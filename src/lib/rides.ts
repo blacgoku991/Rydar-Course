@@ -26,7 +26,18 @@ export interface Ride {
   driverMsgId?: number;
   test?: boolean;
   /** Course envoyée à Rydar Drive (dispatch) : id, numéro, dernier statut connu, chauffeur. */
-  drive?: { id: string; number?: number; status: string; driver?: string };
+  drive?: {
+    id: string;
+    number?: number;
+    status: string;
+    driver?: string;
+    /** updated_at du dernier instantané Rydar Drive appliqué (avis en direct) : un instantané plus ancien est ignoré. */
+    updatedAt?: string;
+    /** Heure de prise en charge connue côté Rydar Drive (ISO), pour signaler un changement d'heure. */
+    pickupAt?: string;
+    /** Admin qui a demandé l'annulation depuis Telegram : l'avis « annulée » de Rydar Drive vient alors d'ici. */
+    cancelBy?: string;
+  };
   log: { at: string; text: string }[];
 }
 

@@ -1,4 +1,5 @@
 import "server-only";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { VehicleId } from "@/config/pricing";
 import { getKnownPlace } from "@/lib/known-places";
 import type { Booking, Place } from "@/lib/types";
@@ -25,14 +26,21 @@ export const DRIVE_STATUS_FR: Record<string, string> = {
   NO_DRIVER_FOUND: "⚠️ Aucun chauffeur trouvé",
 };
 
-/** Statuts finaux côté Rydar Drive. */
-export const DRIVE_FINAL = new Set(["COMPLETED", "CANCELLED", "NO_DRIVER_FOUND"]);
+/**
+ * Statuts définitifs côté Rydar Drive. NO_DRIVER_FOUND n'en fait pas partie : la centrale peut encore
+ * relancer la recherche ou annuler la course.
+ */
+export const DRIVE_FINAL = new Set(["COMPLETED", "CANCELLED"]);
 
 export interface DriveRide {
   id: string;
   number?: number;
   status: string;
-  driver?: { first_name?: string; vehicle?: { model?: string; color?: string; plate?: string } } | null;
+  driver?: { first_name?: string; vehicle?: { model?: string; color?: string; plate?: string } | null } | null;
+  external_reference?: string | null;
+  pickup_at?: string | null;
+  /** Présent dans les avis (webhooks) : sert à écarter un instantané plus ancien que celui déjà appliqué. */
+  updated_at?: string | null;
 }
 
 export class DriveError extends Error {
@@ -113,7 +121,7 @@ export function drivePayload(b: Booking) {
   };
 }
 
-async function call<T>(path: string, init: { method?: string; body?: unknown; idempotencyKey?: string } = {}): Promise<T> {
+async function request(path: string, init: { method?: string; body?: unknown; idempotencyKey?: string } = {}): Promise<Record<string, unknown> | null> {
   const base = apiBase();
   const key = clean(process.env.RYDAR_DRIVE_API_KEY);
   if (!base || !key) throw new DriveError("Rydar Drive non configuré", 0, "NOT_CONFIGURED");
@@ -134,12 +142,17 @@ async function call<T>(path: string, init: { method?: string; body?: unknown; id
   } catch (err) {
     throw new DriveError(`Rydar Drive injoignable : ${(err as Error).message}`, 0, "NETWORK");
   }
-  const json = (await res.json().catch(() => null)) as { data?: T; error?: { code?: string; message?: string; details?: unknown } } | null;
+  const json = (await res.json().catch(() => null)) as (Record<string, unknown> & { error?: { code?: string; message?: string; details?: unknown } }) | null;
   if (!res.ok) {
     const e = json?.error;
     const details = e?.details ? ` ${JSON.stringify(e.details).slice(0, 200)}` : "";
     throw new DriveError(`${e?.message ?? `HTTP ${res.status}`}${details}`, res.status, e?.code ?? `HTTP_${res.status}`);
   }
+  return json;
+}
+
+async function call<T>(path: string, init: { method?: string; body?: unknown; idempotencyKey?: string } = {}): Promise<T> {
+  const json = await request(path, init);
   return (json?.data ?? json) as T;
 }
 
@@ -167,4 +180,99 @@ export function driveDriverLabel(r: DriveRide) {
   const v = d.vehicle;
   const car = [v?.model, v?.color].filter(Boolean).join(" ");
   return [d.first_name, car, v?.plate].filter(Boolean).join(" · ") || undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* Avis en direct (webhooks) de Rydar Drive                             */
+/* ------------------------------------------------------------------ */
+
+/** Chemin de réception des avis sur ce site. */
+export const DRIVE_WEBHOOK_PATH = "/api/drive/webhook";
+
+/** Clé du stockage où l'on garde le dernier avis reçu ({ at, type }), affiché sur /setup. */
+export const DRIVE_WEBHOOK_LAST_KEY = "drivewh:last";
+
+/**
+ * Secret partagé avec Rydar Drive pour signer les avis. RYDAR_DRIVE_WEBHOOK_SECRET s'il est défini, sinon dérivé
+ * d'APP_SECRET (HMAC-SHA256, hexadécimal) : /setup l'envoie lui-même à Rydar Drive, personne n'a à le recopier.
+ * null si aucun des deux n'existe.
+ */
+export function driveWebhookSecret(): string | null {
+  const explicit = clean(process.env.RYDAR_DRIVE_WEBHOOK_SECRET);
+  if (explicit) return explicit;
+  const app = clean(process.env.APP_SECRET);
+  if (!app) return null;
+  return createHmac("sha256", app).update("rydar-drive-webhook:v1").digest("hex");
+}
+
+/** Écart maximal accepté entre l'horodatage de l'avis et l'horloge du site. */
+export const DRIVE_WEBHOOK_TOLERANCE_SEC = 300;
+
+/**
+ * Vérifie un avis Rydar Drive : X-Rydar-Signature = « v1=<hex> » où hex = HMAC-SHA256(secret, `${X-Rydar-Timestamp}.${corps brut}`).
+ * Comparaison en temps constant ; horodatage à ± 5 minutes ; tout en-tête mal formé est refusé.
+ * Plusieurs signatures séparées par des virgules sont acceptées (rotation du secret) : une seule doit correspondre.
+ */
+export function verifyDriveSignature(
+  rawBody: string,
+  timestampHeader: string | null,
+  signatureHeader: string | null,
+  secret: string,
+  nowSec = Math.floor(Date.now() / 1000),
+): boolean {
+  if (!secret || !timestampHeader || !signatureHeader) return false;
+  const ts = timestampHeader.trim();
+  if (!/^\d{1,12}$/.test(ts)) return false;
+  if (Math.abs(nowSec - Number(ts)) > DRIVE_WEBHOOK_TOLERANCE_SEC) return false;
+  const given = signatureHeader
+    .split(",")
+    .map((p) => /^v1=([0-9a-f]{64})$/i.exec(p.trim())?.[1])
+    .filter((h): h is string => !!h);
+  if (!given.length) return false;
+  const expected = createHmac("sha256", secret).update(`${ts}.${rawBody}`).digest();
+  let ok = false;
+  for (const hex of given) {
+    const b = Buffer.from(hex, "hex");
+    if (b.length === expected.length && timingSafeEqual(b, expected)) ok = true;
+  }
+  return ok;
+}
+
+export interface DriveWebhookEndpoint {
+  id: string;
+  url: string;
+  description: string | null;
+  events: string[];
+  enabled: boolean;
+  disabled_reason: string | null;
+  created_at: string;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_error: string | null;
+}
+
+/** Adresse de réception des avis pour ce site. */
+export function driveWebhookUrl(site: string) {
+  return `${site.replace(/\/+$/, "")}${DRIVE_WEBHOOK_PATH}`;
+}
+
+/**
+ * Inscrit (ou réactive) ce site auprès de Rydar Drive pour tous les événements, avec le secret partagé.
+ * Idempotent : même adresse = mise à jour (le secret est remplacé, l'abonnement réactivé).
+ * Exige la permission « webhooks:manage » sur la clé API.
+ */
+export async function registerDriveWebhook(site: string): Promise<{ endpoint: DriveWebhookEndpoint; created: boolean }> {
+  const secret = driveWebhookSecret();
+  if (!secret) throw new DriveError("Secret des avis introuvable : définissez APP_SECRET (ou RYDAR_DRIVE_WEBHOOK_SECRET).", 0, "NO_SECRET");
+  const json = await request("/webhooks", { method: "POST", body: { url: driveWebhookUrl(site), description: "RYDAR Privé", secret } });
+  return { endpoint: json?.data as DriveWebhookEndpoint, created: json?.created === true };
+}
+
+export function listDriveWebhooks() {
+  return call<DriveWebhookEndpoint[]>("/webhooks");
+}
+
+/** Demande à Rydar Drive un avis de test (« ping ») vers cette adresse. */
+export function testDriveWebhook(id: string) {
+  return call<{ delivery_id: string }>(`/webhooks/${encodeURIComponent(id)}/test`, { method: "POST" });
 }

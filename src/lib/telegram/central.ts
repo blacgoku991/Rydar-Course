@@ -1,10 +1,22 @@
 import "server-only";
-import { cancelDriveRide, DRIVE_FINAL, DRIVE_STATUS_FR, DriveError, driveDriverLabel, getDriveRide, type DriveRide } from "@/lib/drive";
+import { cancelDriveRide, DRIVE_FINAL, DRIVE_STATUS_FR, DriveError, getDriveRide, type DriveRide } from "@/lib/drive";
+import { driveAlertKind, mergeDriveRide } from "@/lib/drive-sync";
 import { env } from "@/lib/env";
 import { logLine, loadRide, recentRides, saveRide, updateRide, type Ride, type RideDriver } from "@/lib/rides";
 import { sendToCentral, tg, TelegramError } from "@/lib/telegram/api";
 import { escapeHtml } from "@/lib/telegram/entities";
-import { adminKeyboard, adminText, driverKeyboard, driverText, groupKeyboard, groupText, parisClock, shortDate, shortPlace } from "@/lib/telegram/format";
+import {
+  adminKeyboard,
+  adminText,
+  driveAlertText,
+  driverKeyboard,
+  driverText,
+  groupKeyboard,
+  groupText,
+  parisClock,
+  shortDate,
+  shortPlace,
+} from "@/lib/telegram/format";
 import type { TgCallbackQuery, TgMessage, TgUpdate, TgUser } from "@/lib/telegram/types";
 import type { Booking } from "@/lib/types";
 
@@ -14,7 +26,8 @@ import type { Booking } from "@/lib/types";
  *  - le chauffeur qui prend reçoit les coordonnées en privé (le bot s'ouvre tout seul la 1re fois) ;
  *  - l'admin (TELEGRAM_ADMIN_CHAT_ID) suit tout : prix client, commission, historique, annulation.
  * Avec Rydar Drive : la course est dispatchée par Rydar Drive, pas de fiche dans le groupe ;
- * l'admin garde sa fiche, avec le statut Rydar Drive (bouton « Actualiser »).
+ * l'admin garde sa fiche, avec le statut Rydar Drive, tenue à jour par les avis en direct de Rydar Drive
+ * (POST /api/drive/webhook) et par le bouton « 🔄 Actualiser » (même fonction : applyDriveRide).
  */
 
 const HTML = { parse_mode: "HTML", link_preview_options: { is_disabled: true } } as const;
@@ -71,6 +84,7 @@ export async function postBookingToCentral(b: Booking, opts: { test?: boolean; d
   };
   if (opts.drive) {
     ride.drive = { id: opts.drive.id, number: opts.drive.number, status: opts.drive.status };
+    if (typeof opts.drive.pickup_at === "string") ride.drive.pickupAt = opts.drive.pickup_at;
     ride.log.push(logLine(`🚀 Envoyée à Rydar Drive${opts.drive.number ? ` (n° ${opts.drive.number})` : ""}`));
   } else {
     if (opts.driveError) ride.log.push(logLine(`⚠️ Rydar Drive a refusé (${opts.driveError.slice(0, 160)}) : envoyée au groupe`));
@@ -156,7 +170,51 @@ async function driverAction(ref: string, user: TgUser, action: "done" | "rel"): 
   return { ok: true, message: action === "done" ? "🏁 Merci, course terminée !" : "Course remise en ligne pour les autres chauffeurs." };
 }
 
-/** Relit le statut de la course dans Rydar Drive et met à jour la fiche admin. */
+export type DriveApplyResult = { ok: true; changed: boolean } | { ok: false; reason: "not_found" | "not_linked" | "conflict" };
+
+/** Alerte admin en réponse à la fiche (sans chat admin : dans le groupe). N'échoue jamais. */
+async function alertAdmin(ride: Ride, html: string) {
+  try {
+    if (env.telegramAdminChatId) {
+      await sendAdmin(html, ride.adminMsgId ? { reply_parameters: { message_id: ride.adminMsgId, allow_sending_without_reply: true } } : {});
+    } else if (env.telegramChatId) {
+      await sendToCentral<TgMessage>({ text: html, ...HTML });
+    }
+  } catch (err) {
+    console.error("[rydar] alerte Rydar Drive", err);
+  }
+}
+
+/**
+ * Applique un instantané Rydar Drive (lecture « Actualiser » ou avis en direct) : statut, chauffeur, historique,
+ * puis met à jour la fiche admin. `notify` : envoie aussi une alerte admin quand la course passe en « aucun chauffeur
+ * trouvé » ou est annulée côté Rydar Drive (avis en direct seulement). Les erreurs Telegram ne remontent jamais ;
+ * les erreurs de stockage, si (l'avis sera renvoyé par Rydar Drive).
+ */
+export async function applyDriveRide(ref: string, remote: DriveRide, opts: { event?: string; notify?: boolean } = {}): Promise<DriveApplyResult> {
+  const seen = { linked: true };
+  const res = await updateRide(ref, (r) => {
+    if (!r.drive || r.drive.id !== remote.id) {
+      seen.linked = false;
+      return null;
+    }
+    return mergeDriveRide(r, remote);
+  });
+  if (!res.ok) {
+    if (res.reason === "rejected") return seen.linked ? { ok: true, changed: false } : { ok: false, reason: "not_linked" };
+    return { ok: false, reason: res.reason };
+  }
+  try {
+    await refresh(res.ride);
+    const alert = opts.notify ? driveAlertKind(res.before, res.ride) : null;
+    if (alert) await alertAdmin(res.ride, driveAlertText(res.ride, alert));
+  } catch (err) {
+    console.error(`[rydar] fiche admin après ${opts.event ?? "Rydar Drive"}`, err);
+  }
+  return { ok: true, changed: true };
+}
+
+/** Bouton « 🔄 Actualiser » : relit la course dans Rydar Drive et met à jour la fiche admin. */
 async function refreshDrive(ref: string): Promise<Result> {
   const cur = await loadRide(ref);
   if (!cur?.ride.drive) return { ok: false, message: "Course non liée à Rydar Drive." };
@@ -166,32 +224,35 @@ async function refreshDrive(ref: string): Promise<Result> {
   } catch (err) {
     return { ok: false, message: `Rydar Drive : ${err instanceof DriveError ? err.message : "injoignable"}` };
   }
-  const res = await updateRide(ref, (r) => {
-    if (!r.drive) return null;
-    const driver = driveDriverLabel(remote);
-    if (r.drive.status === remote.status && r.drive.driver === driver) return null;
-    if (r.drive.status !== remote.status) r.log.push(logLine(`Rydar Drive : ${DRIVE_STATUS_FR[remote.status] ?? remote.status}`));
-    if (driver && driver !== r.drive.driver) r.log.push(logLine(`👤 ${driver}`));
-    r.drive = { ...r.drive, status: remote.status, driver };
-    if (remote.status === "COMPLETED") r.status = "done";
-    else if (remote.status === "CANCELLED") r.status = "cancelled";
-    else if (driver) r.status = "taken";
-    return r;
-  });
-  if (res.ok) await refresh(res.ride);
+  const res = await applyDriveRide(ref, remote);
+  if (!res.ok && res.reason === "conflict") return { ok: false, message: "Fiche occupée, réessayez." };
   return { ok: true, message: DRIVE_STATUS_FR[remote.status] ?? remote.status };
 }
 
 async function adminAction(ref: string, user: TgUser, action: "cancel_yes" | "reopen"): Promise<Result> {
   const who = nameOf(user);
+  let viaDrive = false;
   // Course Rydar Drive : l'annulation passe d'abord par Rydar Drive.
   if (action === "cancel_yes") {
     const cur = await loadRide(ref);
     const d = cur?.ride.drive;
     if (d && !DRIVE_FINAL.has(d.status)) {
+      // Marquée avant l'appel : l'avis « annulée » de Rydar Drive peut arriver avant la fin de cette action,
+      // il ne doit alors ni alerter l'admin ni empêcher la suite.
+      await updateRide(ref, (r) => {
+        if (!r.drive) return null;
+        r.drive.cancelBy = who;
+        return r;
+      }).catch((err) => console.error("[rydar] marque d'annulation", err));
       try {
         await cancelDriveRide(d.id, `Annulée par la centrale RYDAR Privé (${who})`);
+        viaDrive = true;
       } catch (err) {
+        await updateRide(ref, (r) => {
+          if (!r.drive?.cancelBy || r.drive.status === "CANCELLED") return null;
+          delete r.drive.cancelBy;
+          return r;
+        }).catch(() => undefined);
         const msg = err instanceof DriveError ? err.message : "injoignable";
         return { ok: false, message: `Annulation refusée par Rydar Drive (${msg}). Annulez-la dans le dashboard Rydar Drive.` };
       }
@@ -199,6 +260,8 @@ async function adminAction(ref: string, user: TgUser, action: "cancel_yes" | "re
   }
   const res = await updateRide(ref, (r) => {
     if (action === "cancel_yes") {
+      // L'avis de Rydar Drive est arrivé avant : annulation déjà enregistrée et fiche déjà à jour.
+      if (viaDrive && r.status === "cancelled") return null;
       if (r.status !== "open" && r.status !== "taken") return null;
       r.status = "cancelled";
       if (r.drive) r.drive.status = "CANCELLED";
@@ -211,7 +274,10 @@ async function adminAction(ref: string, user: TgUser, action: "cancel_yes" | "re
     }
     return r;
   });
-  if (!res.ok) return { ok: false, message: "Action impossible dans l'état actuel." };
+  if (!res.ok) {
+    if (viaDrive && res.reason === "rejected") return { ok: true, message: "Course annulée." };
+    return { ok: false, message: "Action impossible dans l'état actuel." };
+  }
   await refresh(res.ride, { driver: true, previousDriver: res.before.driver });
   const prev = res.before.driver;
   if (prev) {

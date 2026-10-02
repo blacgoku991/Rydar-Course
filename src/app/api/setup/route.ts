@@ -1,7 +1,17 @@
 import { timingSafeEqual } from "node:crypto";
 import { BUSINESS } from "@/config/business";
 import { agentLanguages, ElevenLabsError, setupPhoneNumber, setupVoiceAgent } from "@/lib/agent/elevenlabs";
-import { driveConfigured, pingDrive } from "@/lib/drive";
+import {
+  DRIVE_WEBHOOK_LAST_KEY,
+  driveConfigured,
+  DriveError,
+  driveWebhookSecret,
+  driveWebhookUrl,
+  listDriveWebhooks,
+  pingDrive,
+  registerDriveWebhook,
+  testDriveWebhook,
+} from "@/lib/drive";
 import { env, hasSecretBase, siteUrl } from "@/lib/env";
 import { jsonError, readJson } from "@/lib/http";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
@@ -42,7 +52,7 @@ async function status() {
     },
     twilio: { configured: !!(env.twilioAccountSid && env.twilioAuthToken && env.twilioPhoneNumber), number: env.twilioPhoneNumber ?? null },
     humanTransfer: !!env.humanTransferNumber,
-    drive: { configured: driveConfigured(), url: process.env.RYDAR_DRIVE_URL?.trim() || null },
+    drive: { configured: driveConfigured(), url: process.env.RYDAR_DRIVE_URL?.trim() || null, webhook: await driveWebhookStatus() },
   };
   if (env.telegramToken) {
     try {
@@ -60,6 +70,70 @@ async function status() {
     }
   }
   return out;
+}
+
+/** Suivi en direct (avis Rydar Drive) : secret disponible, inscription chez Rydar Drive, dernier avis reçu. */
+async function driveWebhookStatus() {
+  const url = driveWebhookUrl(siteUrl());
+  let lastReceived: { at: string; type: string } | null = null;
+  try {
+    const raw = await kv().get(DRIVE_WEBHOOK_LAST_KEY);
+    lastReceived = raw ? (JSON.parse(raw) as { at: string; type: string }) : null;
+  } catch {
+    /* stockage indisponible */
+  }
+  const out: Record<string, unknown> = {
+    url,
+    secret: !!driveWebhookSecret(),
+    explicitSecret: !!process.env.RYDAR_DRIVE_WEBHOOK_SECRET?.trim(),
+    lastReceived,
+    registered: null,
+  };
+  if (driveConfigured()) {
+    try {
+      const hook = (await listDriveWebhooks()).find((h) => h.url === url);
+      out.registered = hook
+        ? { enabled: hook.enabled, disabledReason: hook.disabled_reason, lastError: hook.last_error, lastSuccessAt: hook.last_success_at }
+        : false;
+    } catch (err) {
+      out.error = driveWebhookError(err);
+    }
+  }
+  return out;
+}
+
+/** Message clair pour les refus de Rydar Drive liés aux avis en direct. */
+function driveWebhookError(err: unknown) {
+  if (err instanceof DriveError) {
+    if (err.code === "INSUFFICIENT_SCOPE")
+      return "La clé API Rydar Drive n'a pas la permission « Webhooks » (webhooks:manage). Dans Rydar Drive → Intégrations → Clés API, créez une clé avec rides:create, rides:read, rides:cancel et webhooks:manage, remplacez RYDAR_DRIVE_API_KEY dans Vercel puis redéployez.";
+    if (err.status === 404 || err.status === 405) return "Cette version de Rydar Drive ne propose pas encore les webhooks : mettez Rydar Drive à jour.";
+    return err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function connectDriveWebhook() {
+  if (!driveConfigured()) throw new Error("RYDAR_DRIVE_URL et RYDAR_DRIVE_API_KEY sont requis");
+  if (!driveWebhookSecret()) throw new Error("Définissez APP_SECRET (ou RYDAR_DRIVE_WEBHOOK_SECRET) dans Vercel puis redéployez.");
+  const site = siteUrl();
+  if (!site.startsWith("https://")) throw new Error(`L'adresse du site doit être en https (actuellement ${site}) : renseignez NEXT_PUBLIC_SITE_URL.`);
+  let id: string | undefined;
+  try {
+    id = (await registerDriveWebhook(site)).endpoint?.id;
+  } catch (err) {
+    throw new Error(driveWebhookError(err));
+  }
+  // Avis de test : « Dernier avis reçu » se met à jour quelques secondes plus tard.
+  let ping = false;
+  if (id)
+    ping = await testDriveWebhook(id).then(
+      () => true,
+      () => false,
+    );
+  return {
+    message: `Suivi en direct activé : Rydar Drive préviendra le site à chaque étape (chauffeur attribué, en route, sur place, terminée, annulée, aucun chauffeur…) et la fiche admin Telegram se mettra à jour toute seule.${ping ? " Un avis de test vient d'être envoyé : cliquez sur « Vérifier » dans quelques secondes." : ""}`,
+  };
 }
 
 async function connectTelegram() {
@@ -158,12 +232,14 @@ export async function POST(req: Request) {
         if (!driveConfigured()) throw new Error("RYDAR_DRIVE_URL et RYDAR_DRIVE_API_KEY sont requis");
         const r = await pingDrive();
         const scopes = r.scopes ?? [];
-        const missing = ["rides:create", "rides:read", "rides:cancel"].filter((s) => !scopes.includes(s));
+        const missing = ["rides:create", "rides:read", "rides:cancel", "webhooks:manage"].filter((s) => !scopes.includes(s));
         return Response.json({
           ok: true,
           message: `Rydar Drive connecté. Permissions : ${scopes.join(", ") || "?"}.${missing.length ? ` Manquant (conseillé) : ${missing.join(", ")}.` : ""} Les nouvelles réservations y sont envoyées.`,
         });
       }
+      case "drive_webhook":
+        return Response.json({ ok: true, ...(await connectDriveWebhook()) });
       case "phone": {
         const agent = await setupVoiceAgent();
         const phone = await setupPhoneNumber(agent.agentId);

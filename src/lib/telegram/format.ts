@@ -194,6 +194,21 @@ export function driverKeyboard(ride: Ride) {
 
 /* ------------------------------- Admin ------------------------------- */
 
+/** Alerte admin envoyée à la réception d'un avis Rydar Drive (en réponse à la fiche). */
+export function driveAlertText(ride: Ride, kind: "no_driver" | "cancelled"): string {
+  const b = ride.booking;
+  const n = ride.drive?.number ? ` · n° ${ride.drive.number}` : "";
+  const what = `<code>${b.ref}</code>${n} · ${escapeHtml(headLine(b))} · ${escapeHtml(routeLine(b))}`;
+  return kind === "no_driver"
+    ? [
+        "⚠️ <b>Rydar Drive : aucun chauffeur trouvé</b>",
+        what,
+        "",
+        "Action requise : relancez la recherche ou attribuez un chauffeur dans Rydar Drive, sinon prévenez le client.",
+      ].join("\n")
+    : ["❌ <b>Course annulée dans Rydar Drive</b>", what, "", "Prévenez le client si ce n'est pas déjà fait."].join("\n");
+}
+
 const ADMIN_STATUS: Record<Ride["status"], string> = {
   open: "🟡 EN ATTENTE DE CHAUFFEUR",
   taken: "🟢 ATTRIBUÉE",

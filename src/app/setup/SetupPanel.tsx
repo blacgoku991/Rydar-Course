@@ -23,8 +23,50 @@ type Status = {
   elevenlabs: { apiKey: boolean; agentId: string | null; voiceId: string | null; languages: string[]; webhookSecret: boolean };
   twilio: { configured: boolean; number: string | null };
   humanTransfer: boolean;
-  drive: { configured: boolean; url: string | null };
+  drive: {
+    configured: boolean;
+    url: string | null;
+    webhook: {
+      url: string;
+      secret: boolean;
+      explicitSecret: boolean;
+      lastReceived: { at: string; type: string } | null;
+      /** null = clé API absente ; false = pas encore inscrit chez Rydar Drive. */
+      registered: null | false | { enabled: boolean; disabledReason: string | null; lastError: string | null; lastSuccessAt: string | null };
+      error?: string;
+    };
+  };
 };
+
+const DRIVE_EVENT_FR: Record<string, string> = {
+  ping: "avis de test",
+  "ride.created": "course créée",
+  "ride.accepted": "chauffeur attribué",
+  "ride.driver_unassigned": "chauffeur retiré",
+  "ride.driver_en_route": "chauffeur en route",
+  "ride.driver_arrived": "chauffeur sur place",
+  "ride.passenger_onboard": "client à bord",
+  "ride.in_progress": "en course",
+  "ride.completed": "course terminée",
+  "ride.cancelled": "course annulée",
+  "ride.no_driver_found": "aucun chauffeur trouvé",
+  "ride.rescheduled": "heure modifiée",
+};
+
+function parisTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", dateStyle: "short", timeStyle: "medium" }).format(d);
+}
+
+function liveTrackingDetail(w: Status["drive"]["webhook"]) {
+  if (w.error) return w.error;
+  if (w.registered === null) return "ajoutez d'abord la clé API Rydar Drive";
+  if (w.registered === false) return "non activé : cliquez sur « Activer le suivi en direct »";
+  if (!w.registered.enabled)
+    return `désactivé par Rydar Drive${w.registered.disabledReason ? ` (${w.registered.disabledReason})` : ""} : cliquez sur « Activer le suivi en direct » pour le réactiver`;
+  return `activé${w.registered.lastError ? ` · dernière erreur : ${w.registered.lastError}` : ""}`;
+}
 
 type Log = { ok: boolean; text: string; extra?: string };
 
@@ -145,10 +187,37 @@ export default function SetupPanel() {
                 label="RYDAR_DRIVE_API_KEY"
                 detail={status.drive.configured ? "les courses partent dans Rydar Drive" : "sans clé : les courses vont dans le groupe Telegram"}
               />
+              {!status.drive.webhook.secret && (
+                <Item
+                  ok={false}
+                  label="Secret du suivi en direct manquant"
+                  detail="APP_SECRET et RYDAR_DRIVE_WEBHOOK_SECRET sont vides : définissez APP_SECRET dans Vercel puis redéployez."
+                />
+              )}
+              <Item
+                ok={!!status.drive.webhook.registered && status.drive.webhook.registered.enabled && !status.drive.webhook.error}
+                label="Suivi en direct (fiche admin mise à jour toute seule)"
+                detail={liveTrackingDetail(status.drive.webhook)}
+              />
+              <Item
+                ok={!!status.drive.webhook.lastReceived}
+                label={`Dernier avis reçu de Rydar Drive : ${
+                  status.drive.webhook.lastReceived
+                    ? `${parisTime(status.drive.webhook.lastReceived.at)} (${DRIVE_EVENT_FR[status.drive.webhook.lastReceived.type] ?? status.drive.webhook.lastReceived.type})`
+                    : "aucun pour l'instant"
+                }`}
+              />
             </ul>
             <div className={styles.actions}>
               <button className="btn btn-primary" disabled={!status.drive.configured || busy !== null} onClick={() => call("drive")}>
                 {busy === "drive" ? "…" : "Tester Rydar Drive"}
+              </button>
+              <button
+                className="btn btn-ghost"
+                disabled={!status.drive.configured || !status.drive.webhook.secret || busy !== null}
+                onClick={() => call("drive_webhook")}
+              >
+                {busy === "drive_webhook" ? "…" : "Activer le suivi en direct"}
               </button>
             </div>
           </section>

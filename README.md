@@ -98,11 +98,19 @@ Toutes les variables sont décrites dans [`.env.example`](.env.example).
 
 Avec Rydar Drive, les réservations du site, du téléphone et de l'assistant vocal partent **dans Rydar Drive** : c'est lui qui les propose aux chauffeurs. Telegram ne garde que la **fiche admin** : prix, commission, statut Rydar Drive, boutons « 🔄 Actualiser », « 🚀 Ouvrir Rydar Drive » et « ❌ Annuler ».
 
-1. Dans Rydar Drive : _Dashboard → Intégrations → Clés API_. Créez une clé avec les permissions `rides:create`, `rides:read` et `rides:cancel`, **sans origine navigateur**.
+1. Dans Rydar Drive : _Dashboard → Intégrations → Clés API_. Créez une clé avec les permissions `rides:create`, `rides:read`, `rides:cancel` et **Webhooks** (`webhooks:manage`), **sans origine navigateur**. Une clé existante ne peut pas recevoir de nouvelle permission : créez-en une nouvelle.
 2. Dans Vercel, ajoutez :
    - `RYDAR_DRIVE_URL`, par exemple `https://app.rydar.app` ;
    - `RYDAR_DRIVE_API_KEY` (type _Sensitive_).
-3. Redéployez. Sur `/setup`, cliquez **Tester Rydar Drive**.
+3. Redéployez.
+4. Sur `/setup`, cliquez **Tester Rydar Drive**, puis **Activer le suivi en direct**. Le site s'inscrit lui-même auprès de Rydar Drive, avec un secret tiré d'`APP_SECRET` : rien à recopier. Quelques secondes plus tard, cliquez sur **Vérifier** : la ligne « Dernier avis reçu de Rydar Drive » doit afficher l'avis de test.
+
+**Suivi en direct :** à chaque étape (chauffeur attribué, en route, sur place, client à bord, terminée, annulée, heure modifiée…), Rydar Drive prévient le site (`/api/drive/webhook`, avis signés). La fiche admin Telegram se met à jour toute seule, avec le chauffeur et l'historique. Vous recevez en plus un message :
+
+- ⚠️ quand Rydar Drive **ne trouve aucun chauffeur** : relancez la recherche ou attribuez un chauffeur dans Rydar Drive, sinon prévenez le client ;
+- ❌ quand une course est **annulée dans Rydar Drive** (pas quand vous l'annulez depuis la fiche).
+
+Le bouton « 🔄 Actualiser » reste disponible. Après un changement d'`APP_SECRET` (ou de `RYDAR_DRIVE_WEBHOOK_SECRET`), cliquez de nouveau sur **Activer le suivi en direct**.
 
 **Ce qui est envoyé :** adresses et coordonnées, date et heure, client, passagers, bagages, catégorie (Berline → `business`, Van → `van`, Prestige → `first`), prix client, numéro de vol et référence RP-…. La référence sert aussi de clé anti-doublon.
 
@@ -110,7 +118,8 @@ Avec Rydar Drive, les réservations du site, du téléphone et de l'assistant vo
 
 - Si Rydar Drive refuse ou ne répond pas, la course part dans le **groupe Telegram**, avec le bouton « JE PRENDS ». L'historique indique la raison.
 - Les courses test de `/setup` ne sont jamais envoyées à Rydar Drive.
-- Rydar Drive ne prévient pas encore RYDAR Privé quand le statut change. Pour voir le dernier statut, appuyez sur « 🔄 Actualiser » dans la fiche admin.
+- Les avis de Rydar Drive sont vérifiés (signature, heure) et traités une seule fois ; un avis arrivé en retard ne fait jamais reculer une course. Les courses créées directement dans Rydar Drive sont ignorées.
+- Si le site ne répond pas, Rydar Drive renvoie l'avis plus tard (pendant environ 2 jours).
 
 ## Lien publicité (Meta Ads, Google…)
 
