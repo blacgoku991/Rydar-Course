@@ -256,11 +256,10 @@
   flex-wrap: wrap;
   gap: 12px;
 }
-.voicePending {
-  display: grid;
-  gap: 14px;
-  justify-items: start;
+.voiceNote {
+  margin: 0;
   color: var(--muted);
+  font-size: 14px;
 }
 .call {
   position: relative;

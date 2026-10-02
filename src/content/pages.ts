@@ -678,7 +678,7 @@ const CONTENT: Record<PageKey, Record<Locale, PageContent>> = {
           bullets: [
             "Identité et coordonnées : nom, téléphone, e-mail facultatif.",
             "Informations de trajet : adresses, date, heure, passagers, bagages, numéro de vol ou de train, remarques.",
-            "Échanges avec l'assistant vocal (téléphone ou site) : numéro appelant le cas échéant, enregistrement et transcription de la conversation. Sur le site, le micro n'est utilisé qu'après votre clic sur « Démarrer ».",
+            "Échanges avec l'assistant vocal (téléphone ou site) : numéro appelant le cas échéant, enregistrement et transcription de la conversation. Sur le site, le micro n'est utilisé qu'après votre appui sur « Appeler » ou « Démarrer ».",
             "Données techniques : journaux de connexion conservés par l'hébergeur à des fins de sécurité.",
           ],
         },
@@ -730,7 +730,7 @@ const CONTENT: Record<PageKey, Record<Locale, PageContent>> = {
           bullets: [
             "Identity and contact details: name, phone, optional email.",
             "Journey information: addresses, date, time, passengers, luggage, flight or train number, notes.",
-            "Conversations with the voice assistant (phone or website): caller number where applicable, recording and transcript of the conversation. On the website, the microphone is only used after you click “Start”.",
+            "Conversations with the voice assistant (phone or website): caller number where applicable, recording and transcript of the conversation. On the website, the microphone is only used after you tap “Call” or “Start”.",
             "Technical data: connection logs kept by our host for security purposes.",
           ],
         },

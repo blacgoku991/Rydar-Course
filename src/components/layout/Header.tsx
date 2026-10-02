@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import CallButton from "@/components/voice/CallButton";
 import type { Dictionary } from "@/i18n";
 import { pathFor, switchLocalePath } from "@/i18n/routes";
 import type { Locale } from "@/lib/types";
@@ -13,11 +14,9 @@ interface Props {
   locale: Locale;
   nav: Dictionary["nav"];
   a11y: Dictionary["a11y"];
-  phoneHref: string;
-  phoneDisplay: string;
 }
 
-export default function Header({ locale, nav, a11y, phoneHref, phoneDisplay }: Props) {
+export default function Header({ locale, nav, a11y }: Props) {
   const pathname = usePathname() || `/${locale}`;
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -84,12 +83,8 @@ export default function Header({ locale, nav, a11y, phoneHref, phoneDisplay }: P
               </Link>
             ))}
           </div>
-          {phoneHref && (
-            <a href={phoneHref} className={styles.phone}>
-              <PhoneIcon />
-              <span>{phoneDisplay}</span>
-            </a>
-          )}
+          {/* Pas de ligne téléphonique : « Appeler » lance l'assistant vocal du site */}
+          <CallButton label={nav.call} className={styles.phone} />
           <a href={bookHref} className={`btn btn-primary ${styles.cta}`}>
             {nav.book}
           </a>
@@ -119,22 +114,10 @@ export default function Header({ locale, nav, a11y, phoneHref, phoneDisplay }: P
             <a href={bookHref} className="btn btn-primary" onClick={() => setOpen(false)}>
               {nav.book}
             </a>
-            {phoneHref && (
-              <a href={phoneHref} className="btn btn-ghost">
-                {nav.call} · {phoneDisplay}
-              </a>
-            )}
+            <CallButton label={nav.call} className="btn btn-ghost" onClick={() => setOpen(false)} />
           </div>
         </nav>
       </div>
     </header>
-  );
-}
-
-export function PhoneIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" strokeLinejoin="round" />
-    </svg>
   );
 }

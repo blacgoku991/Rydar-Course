@@ -1,0 +1,163 @@
+/* Page « Appeler » : écran d'appel, un seul geste. */
+.call {
+  position: relative;
+  overflow: hidden;
+  min-height: 100dvh;
+  padding: calc(var(--header-h) + 48px) 0 140px;
+}
+.call::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  width: min(1000px, 140vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(169, 187, 197, 0.12), transparent 62%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  text-align: center;
+}
+.title {
+  font-size: clamp(2.6rem, 7vw, 5rem);
+}
+.lead {
+  margin-inline: auto;
+  max-width: 46ch;
+}
+
+/* Bouton d'appel : disque platine + libellé */
+.dial {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.dial svg {
+  width: 124px;
+  height: 124px;
+  padding: 40px;
+  border-radius: 50%;
+  color: var(--ink);
+  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--platinum-hi) 24%, var(--platinum) 60%, var(--platinum-lo) 100%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 24px 60px -18px rgba(169, 187, 197, 0.6);
+  animation: ring 2.6s var(--ease) infinite;
+  transition: transform 0.4s var(--ease);
+}
+.dial:hover svg {
+  transform: scale(1.04);
+}
+.dial:active svg {
+  transform: scale(0.97);
+}
+.dial:focus-visible {
+  outline: none;
+}
+.dial:focus-visible svg {
+  outline: 2px solid var(--platinum-hi);
+  outline-offset: 6px;
+}
+
+.note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.steps {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--text-2);
+}
+.stepIndex {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line-3);
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--platinum-hi);
+}
+
+.langs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.langs li {
+  padding: 6px 14px;
+  border: 1px solid var(--line-3);
+  border-radius: 999px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.notice {
+  margin: 4px 0 0;
+  max-width: 46ch;
+  color: var(--muted);
+  font-size: 13px;
+}
+.notice a {
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@keyframes ring {
+  0% {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.6) inset,
+      0 24px 60px -18px rgba(169, 187, 197, 0.6),
+      0 0 0 0 rgba(219, 227, 232, 0.32);
+  }
+  70%,
+  100% {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.6) inset,
+      0 24px 60px -18px rgba(169, 187, 197, 0.6),
+      0 0 0 26px rgba(219, 227, 232, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dial svg {
+    animation: none;
+  }
+}

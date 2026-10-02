@@ -12,6 +12,16 @@ export const PAGE_SLUGS = {
 } as const satisfies Record<string, Record<Locale, string>>;
 
 export type PageKey = keyof typeof PAGE_SLUGS;
+
+/**
+ * Page « Appeler » (lien des publicités) : l'assistant vocal répond au premier appui. Pas de ligne téléphonique ;
+ * hors plan du site (non indexée).
+ */
+export const CALL_SLUGS = { fr: "appel", en: "call" } as const satisfies Record<Locale, string>;
+
+export function callPath(locale: Locale) {
+  return `/${locale}/${CALL_SLUGS[locale]}`;
+}
 export const PAGE_KEYS = Object.keys(PAGE_SLUGS) as PageKey[];
 export const SERVICE_PAGES: PageKey[] = ["cdg", "orly", "chauffeur", "hourly"];
 export const LEGAL_PAGES: PageKey[] = ["legal", "terms", "privacy"];
@@ -30,6 +40,7 @@ export function switchLocalePath(pathname: string, to: Locale) {
   const from = parts[0] as Locale | undefined;
   if (!from || (from !== "fr" && from !== "en")) return `/${to}`;
   if (parts.length === 1) return `/${to}`;
+  if (parts[1] === CALL_SLUGS[from]) return callPath(to);
   const key = keyFromSlug(parts[1], from);
   return key ? pathFor(key, to) : `/${to}`;
 }

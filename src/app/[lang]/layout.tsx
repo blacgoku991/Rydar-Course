@@ -66,16 +66,10 @@ export default async function LocaleLayout({ children, params }: { children: Rea
         <a className="skip-link" href="#main">
           {dict.a11y.skip}
         </a>
-        <Header locale={lang} nav={dict.nav} a11y={dict.a11y} phoneHref={BUSINESS.phoneHref} phoneDisplay={BUSINESS.phoneDisplay} />
+        <Header locale={lang} nav={dict.nav} a11y={dict.a11y} />
         <main id="main">{children}</main>
         <Footer locale={lang} dict={dict} />
-        <MobileBar
-          nav={dict.nav}
-          assistantLabel={dict.assistant.short}
-          homePath={pathFor("home", lang)}
-          phoneHref={BUSINESS.phoneHref}
-          phoneDisplay={BUSINESS.phoneDisplay}
-        />
+        <MobileBar nav={dict.nav} homePath={pathFor("home", lang)} />
         <VoiceAssistant locale={lang} dict={dict.assistant} privacyHref={pathFor("privacy", lang)} />
         <RevealObserver />
         <JsonLd data={org} />

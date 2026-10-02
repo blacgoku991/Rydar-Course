@@ -95,10 +95,16 @@
   display: none;
   align-items: center;
   gap: 8px;
+  min-height: 42px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text-2);
+  cursor: pointer;
 }
 .phone:hover {
   color: var(--text);
@@ -176,6 +182,9 @@
 }
 
 @media (min-width: 720px) {
+  .phone {
+    display: inline-flex;
+  }
   .cta {
     display: inline-flex;
   }
@@ -190,11 +199,5 @@
   }
   .drawer {
     display: none;
-  }
-}
-
-@media (min-width: 1280px) {
-  .phone {
-    display: inline-flex;
   }
 }

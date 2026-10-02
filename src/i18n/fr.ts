@@ -166,10 +166,9 @@ const fr = {
   voice: {
     kicker: "Par téléphone",
     title: "Une voix vous répond, jour et nuit",
-    text: "Notre assistant vocal prend votre réservation au téléphone en français ou en anglais : adresses, horaire, tarif, confirmation. Si besoin, la centrale prend le relais.",
-    cta: "Appeler la centrale",
-    pending: "La ligne téléphonique ouvre bientôt. Parlez dès maintenant à l'assistant depuis votre navigateur, ou réservez en ligne.",
-    talk: "Parler à l'assistant",
+    text: "Notre assistante vocale prend votre réservation de vive voix, en français ou en anglais : adresses, horaire, tarif, confirmation. Si besoin, la centrale prend le relais.",
+    cta: "Appeler",
+    note: "Elle vous répond aussitôt, depuis votre téléphone ou votre ordinateur. Gratuit.",
     bookOnline: "Réserver en ligne",
     langs: ["Français", "English"],
     sample: "Exemple de conversation",
@@ -178,12 +177,11 @@ const fr = {
       { who: "client", text: "Demain à huit heures, de mon hôtel rue de Rivoli jusqu'à Roissy, terminal 2E." },
       { who: "ai", text: "Pour demain huit heures : en berline business, le forfait est de {price}. Je vous la réserve ?" },
       { who: "client", text: "Oui, au nom de Martin." },
-      { who: "ai", text: "C'est noté, monsieur Martin. La centrale vous confirme le chauffeur par SMS." },
+      { who: "ai", text: "C'est noté, monsieur Martin. La centrale vous confirme votre chauffeur." },
     ],
   },
   assistant: {
     open: "Parler à l'assistant",
-    short: "Assistant",
     title: "Assistant vocal",
     subtitle: "Réservez de vive voix, en une minute.",
     hint: "Dites simplement : « Demain 10 h, gare de Lyon vers Roissy terminal 2 ».",
@@ -200,6 +198,18 @@ const fr = {
     privacy: "Confidentialité",
     firstMessage:
       "Bonjour, je suis l'assistante de RYDAR Privé. Cette conversation est enregistrée pour traiter votre réservation. Dites-moi d'où vous partez, où vous allez et quand.",
+  },
+  call: {
+    metaTitle: "Appeler RYDAR Privé — votre chauffeur réservé de vive voix, 24 h/24",
+    metaDescription:
+      "Appuyez sur Appeler : notre assistante vocale vous répond aussitôt, en français ou en anglais, et réserve votre chauffeur privé à Paris et vers les aéroports. Prix fixé avant le départ.",
+    kicker: "Assistant vocal · 24 h/24",
+    title: "Appelez, on vous répond.",
+    lead: "Notre assistante vous répond tout de suite, en français ou en anglais : départ, destination, heure, prix fixé. Votre trajet est réservé en une minute.",
+    button: "Appeler",
+    note: "Gratuit, depuis votre navigateur. Autorisez le micro quand il vous est demandé.",
+    steps: ["Appuyez sur « Appeler »", "Autorisez le micro", "Dites où et quand : l'assistante s'occupe du reste"],
+    online: "Préférer réserver en ligne",
   },
   promises: {
     kicker: "Nos engagements",

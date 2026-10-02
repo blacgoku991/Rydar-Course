@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dictionary } from "@/i18n";
 import type { Locale } from "@/lib/types";
-import { VOICE_EVENT } from "./events";
+import { VOICE_EVENT, type VoiceEventDetail } from "./events";
 import styles from "./VoiceAssistant.module.css";
 
 type Phase = "idle" | "connecting" | "listening" | "speaking" | "ended" | "error";
@@ -24,10 +24,15 @@ export default function VoiceAssistant({ locale, dict, privacyHref }: { locale: 
   const log = useRef<HTMLOListElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const lineId = useRef(0);
+  /** Change à chaque raccrochage : un lancement encore en cours (micro, jeton, connexion) est alors abandonné. */
+  const attempt = useRef(0);
+  /** Lancement en cours (numéro de tentative) : un second appui sur « Appeler » n'ouvre pas une autre conversation. */
+  const launching = useRef<number | null>(null);
 
   const active = phase === "connecting" || phase === "listening" || phase === "speaking";
 
   const stop = useCallback(async () => {
+    attempt.current += 1;
     const s = session.current;
     session.current = null;
     if (s) await s.endSession().catch(() => undefined);
@@ -39,56 +44,81 @@ export default function VoiceAssistant({ locale, dict, privacyHref }: { locale: 
   }, []);
 
   const start = useCallback(async () => {
-    if (session.current) return;
+    if (session.current || launching.current === attempt.current) return;
+    const mine = attempt.current;
+    // Raccroché (ou panneau fermé) depuis : cette tentative ne touche plus à rien.
+    const live = () => attempt.current === mine;
+    launching.current = mine;
     setError(null);
     setLines([]);
     setPhase("connecting");
 
-    // Demande le micro d'abord pour afficher un message clair en cas de refus.
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-    } catch {
-      return fail(dict.mic);
-    }
+      // Demande le micro d'abord pour afficher un message clair en cas de refus.
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        if (live()) fail(dict.mic);
+        return;
+      }
+      if (!live()) return;
 
-    let auth: { token?: string; agentId?: string };
-    try {
-      const res = await fetch("/api/agent/session", { cache: "no-store" });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; token?: string; agentId?: string };
-      if (!res.ok || !data.ok) return fail(res.status === 429 ? dict.busy : dict.error);
-      auth = data;
-    } catch {
-      return fail(dict.error);
-    }
+      let auth: { token?: string; agentId?: string };
+      try {
+        const res = await fetch("/api/agent/session", { cache: "no-store" });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; token?: string; agentId?: string };
+        if (!live()) return;
+        if (!res.ok || !data.ok) return fail(res.status === 429 ? dict.busy : dict.error);
+        auth = data;
+      } catch {
+        if (live()) fail(dict.error);
+        return;
+      }
 
-    try {
-      const { Conversation } = await import("@elevenlabs/client");
-      const options = {
-        overrides: { agent: { language: locale, firstMessage: dict.firstMessage } },
-        dynamicVariables: { channel: "web" },
-        onConnect: () => setPhase("listening"),
-        onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => setPhase(mode),
-        onMessage: ({ message, role }: { message: string; role: "user" | "agent" }) => {
-          if (!message.trim()) return;
-          setLines((prev) => [...prev.slice(-11), { id: ++lineId.current, who: role, text: message }]);
-        },
-        onDisconnect: (details: { reason: string }) => {
-          session.current = null;
-          if (details.reason === "error") fail(dict.error);
-          else setPhase("ended");
-        },
-        onError: (message: string) => console.warn("[rydar] assistant vocal", message),
-      };
-      const s = auth.token
-        ? await Conversation.startSession({ ...options, conversationToken: auth.token, connectionType: "webrtc" })
-        : await Conversation.startSession({ ...options, agentId: auth.agentId!, connectionType: "webrtc" });
-      session.current = s;
-    } catch (err) {
-      console.warn("[rydar] assistant vocal", err);
-      fail(dict.error);
+      try {
+        const { Conversation } = await import("@elevenlabs/client");
+        if (!live()) return;
+        const options = {
+          overrides: { agent: { language: locale, firstMessage: dict.firstMessage } },
+          dynamicVariables: { channel: "web" },
+          onConnect: () => live() && setPhase("listening"),
+          onModeChange: ({ mode }: { mode: "speaking" | "listening" }) => live() && setPhase(mode),
+          onMessage: ({ message, role }: { message: string; role: "user" | "agent" }) => {
+            if (!live() || !message.trim()) return;
+            setLines((prev) => [...prev.slice(-11), { id: ++lineId.current, who: role, text: message }]);
+          },
+          onDisconnect: (details: { reason: string }) => {
+            // Raccroché par le client : l'état « terminée » est déjà affiché (une nouvelle conversation a pu commencer).
+            if (!live()) return;
+            session.current = null;
+            if (details.reason === "error") fail(dict.error);
+            else setPhase("ended");
+          },
+          onError: (message: string) => console.warn("[rydar] assistant vocal", message),
+        };
+        const s = auth.token
+          ? await Conversation.startSession({ ...options, conversationToken: auth.token, connectionType: "webrtc" })
+          : await Conversation.startSession({ ...options, agentId: auth.agentId!, connectionType: "webrtc" });
+        if (!live()) {
+          void s.endSession().catch(() => undefined);
+          return;
+        }
+        session.current = s;
+      } catch (err) {
+        if (!live()) return;
+        console.warn("[rydar] assistant vocal", err);
+        fail(dict.error);
+      }
+    } finally {
+      if (launching.current === mine) launching.current = null;
     }
   }, [dict, fail, locale]);
+
+  const hangup = useCallback(() => {
+    void stop();
+    setPhase("ended");
+  }, [stop]);
 
   const close = useCallback(() => {
     void stop();
@@ -96,12 +126,20 @@ export default function VoiceAssistant({ locale, dict, privacyHref }: { locale: 
     setPhase((p) => (p === "error" ? "idle" : p === "idle" ? p : "ended"));
   }, [stop]);
 
-  // Ouverture depuis les autres boutons du site, ou par lien direct (publicités) :
-  // …/fr?assistant=1 ou …/fr#assistant ouvre l'assistant dès l'arrivée sur la page.
+  const startRef = useRef(start);
   useEffect(() => {
-    const onOpen = () => setOpen(true);
+    startRef.current = start;
+  }, [start]);
+
+  // Ouverture depuis les autres boutons du site (« Appeler » : conversation lancée aussitôt, l'appui du client
+  // autorise le micro), ou par lien direct : …/fr?assistant=1 ou …/fr#assistant ouvre l'assistant dès l'arrivée.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      setOpen(true);
+      if ((e as CustomEvent<VoiceEventDetail>).detail?.call) void startRef.current();
+    };
     const url = new URL(window.location.href);
-    if (url.searchParams.has("assistant") || url.hash === "#assistant") onOpen();
+    if (url.searchParams.has("assistant") || url.hash === "#assistant") setOpen(true);
     window.addEventListener(VOICE_EVENT, onOpen);
     return () => window.removeEventListener(VOICE_EVENT, onOpen);
   }, []);
@@ -201,7 +239,7 @@ export default function VoiceAssistant({ locale, dict, privacyHref }: { locale: 
 
           <div className={styles.actions}>
             {active ? (
-              <button type="button" className={`btn ${styles.hangup}`} onClick={() => void stop()}>
+              <button type="button" className={`btn ${styles.hangup}`} onClick={hangup}>
                 <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6">
                   <path d="M3 14.5c5-4.7 13-4.7 18 0l-2.4 2.6-3.3-1.4v-2.4a12 12 0 0 0-6.6 0v2.4l-3.3 1.4L3 14.5Z" strokeLinejoin="round" />
                 </svg>

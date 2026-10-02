@@ -61,6 +61,8 @@ Toutes les variables sont décrites dans [`.env.example`](.env.example).
 
 ## 3. Brancher l'IA téléphonique (≈ 20 min)
 
+**Sans ligne téléphonique (par défaut) :** tous les boutons « Appeler » du site lancent l'IA dans le navigateur du client. Seules les étapes 1 et 4 (**Créer / mettre à jour l'agent**) sont nécessaires : ni Twilio, ni numéro, ni Kbis. Le numéro Twilio (étape 2) reste possible plus tard.
+
 1. **ElevenLabs** ([elevenlabs.io](https://elevenlabs.io)) : créez un compte, ouvrez _Developers → API Keys_ et créez une clé. Ajoutez-la dans la variable `ELEVENLABS_API_KEY`.
    - Recommandé : dans _Voice Library_, choisissez une voix **française** naturelle et copiez son ID dans `ELEVENLABS_VOICE_ID`.
 2. **Twilio** ([twilio.com](https://www.twilio.com)) : achetez un numéro qui accepte les appels entrants.
@@ -81,7 +83,7 @@ Toutes les variables sont décrites dans [`.env.example`](.env.example).
 - Elle ne promet jamais un chauffeur confirmé : c'est la centrale qui confirme.
 - Elle ne demande jamais de carte bancaire.
 
-**Sur le site (sans téléphone) :** un bouton « Parler à l'assistant » ouvre la même IA dans le navigateur. Il apparaît en bas à droite sur ordinateur, dans la barre du bas sur mobile et dans la section « Par téléphone ».
+**Sur le site (sans téléphone) :** chaque bouton « Appeler » (en-tête, barre du bas sur mobile, section « Par téléphone », pages de service, page `/fr/appel`) ouvre la même IA dans le navigateur et **lance la conversation aussitôt** : un seul appui, le navigateur demande juste l'accès au micro la première fois. Sur ordinateur, le bouton « Parler à l'assistant » en bas à droite ouvre aussi l'assistant.
 
 - C'est gratuit côté téléphonie : seules les minutes ElevenLabs sont consommées.
 - Le serveur délivre un jeton à usage unique (`/api/agent/session`), donc la clé ElevenLabs reste secrète. La route est limitée à 6 ouvertures par IP toutes les 10 minutes.
@@ -98,9 +100,9 @@ Toutes les variables sont décrites dans [`.env.example`](.env.example).
 
 Avec Rydar Drive, les réservations du site, du téléphone et de l'assistant vocal partent **dans Rydar Drive** : c'est lui qui les propose aux chauffeurs. Telegram ne garde que la **fiche admin** : prix, commission, statut Rydar Drive, boutons « 🔄 Actualiser », « 🚀 Ouvrir Rydar Drive » et « ❌ Annuler ».
 
-1. Dans Rydar Drive : _Dashboard → Intégrations → Clés API_. Créez une clé avec les permissions `rides:create`, `rides:read`, `rides:cancel` et **Webhooks** (`webhooks:manage`), **sans origine navigateur**. Une clé existante ne peut pas recevoir de nouvelle permission : créez-en une nouvelle.
+1. Dans Rydar Drive (centrale RYDAR Privé) : _API & site web → Clés API_. Créez une clé avec les permissions `rides:create`, `rides:read`, `rides:cancel` et **Webhooks** (`webhooks:manage`), **sans origine navigateur**. Une clé existante ne peut pas recevoir de nouvelle permission : créez-en une nouvelle.
 2. Dans Vercel, ajoutez :
-   - `RYDAR_DRIVE_URL`, par exemple `https://app.rydar.app` ;
+   - `RYDAR_DRIVE_URL`, par exemple `https://rydardrive.com` ;
    - `RYDAR_DRIVE_API_KEY` (type _Sensitive_).
 3. Redéployez.
 4. Sur `/setup`, cliquez **Tester Rydar Drive**, puis **Activer le suivi en direct**. Le site s'inscrit lui-même auprès de Rydar Drive, avec un secret tiré d'`APP_SECRET` : rien à recopier. Quelques secondes plus tard, cliquez sur **Vérifier** : la ligne « Dernier avis reçu de Rydar Drive » doit afficher l'avis de test.
@@ -123,12 +125,16 @@ Le bouton « 🔄 Actualiser » reste disponible. Après un changement d'`APP_SE
 
 ## Lien publicité (Meta Ads, Google…)
 
-Pour qu'une publicité ouvre directement l'assistant vocal, ajoutez `?assistant=1` à l'adresse :
+Pour qu'une publicité « appelle » l'IA, utilisez la page **Appeler** : un grand bouton, un appui, l'assistante répond.
 
-- `https://votre-site/fr?assistant=1` (français)
-- `https://votre-site/en?assistant=1` (anglais)
+- `https://votre-site/fr/appel` (français)
+- `https://votre-site/en/call` (anglais)
 
-Les paramètres de suivi peuvent s'ajouter à la suite, par exemple `?assistant=1&utm_source=meta`. Le client arrive sur le site avec l'assistant ouvert et appuie sur « Démarrer ». Les navigateurs exigent ce geste avant d'utiliser le micro.
+Dans Meta Ads, mettez cette adresse comme **URL du site web** et choisissez le bouton **« Contactez-nous »** ou **« Réserver »**. Le bouton Meta « Appeler maintenant » exige un vrai numéro de téléphone : ne l'utilisez pas. Les paramètres de suivi peuvent s'ajouter, par exemple `…/fr/appel?utm_source=meta`.
+
+L'appel ne démarre pas tout seul à l'ouverture de la page : les navigateurs exigent un appui du client avant d'utiliser le micro. La page n'est pas indexée par Google (doublon de l'accueil).
+
+Autre possibilité : `https://votre-site/fr?assistant=1` ouvre l'accueil avec l'assistant déjà ouvert (le client appuie sur « Démarrer »).
 
 ## 4. Recommandé : stockage Upstash (gratuit)
 

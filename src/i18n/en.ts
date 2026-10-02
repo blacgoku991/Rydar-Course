@@ -168,10 +168,9 @@ const en: Dictionary = {
   voice: {
     kicker: "By phone",
     title: "A voice answers, day and night",
-    text: "Our voice assistant takes your booking over the phone in English or French: addresses, time, price, confirmation. Our dispatch team takes over whenever needed.",
-    cta: "Call our dispatch",
-    pending: "Our phone line opens soon. Talk to the assistant right now from your browser, or book online.",
-    talk: "Talk to the assistant",
+    text: "Our voice assistant takes your booking by voice, in English or French: addresses, time, price, confirmation. Our dispatch team takes over whenever needed.",
+    cta: "Call",
+    note: "She answers right away, from your phone or your computer. Free of charge.",
     bookOnline: "Book online",
     langs: ["English", "Français"],
     sample: "Sample conversation",
@@ -180,12 +179,11 @@ const en: Dictionary = {
       { who: "client", text: "Tomorrow at eight, from my hotel on rue de Rivoli to Charles de Gaulle, terminal 2E." },
       { who: "ai", text: "Tomorrow at eight: in a business sedan, the flat rate is {price}. Shall I book it for you?" },
       { who: "client", text: "Yes, under the name Martin." },
-      { who: "ai", text: "Done, Mr Martin. Our dispatch team will text you the chauffeur's confirmation." },
+      { who: "ai", text: "Done, Mr Martin. Our dispatch team will confirm your chauffeur." },
     ],
   },
   assistant: {
     open: "Talk to the assistant",
-    short: "Assistant",
     title: "Voice assistant",
     subtitle: "Book by voice in one minute.",
     hint: "Just say: “Tomorrow 10am, Gare de Lyon to Charles de Gaulle terminal 2”.",
@@ -202,6 +200,18 @@ const en: Dictionary = {
     privacy: "Privacy",
     firstMessage:
       "Hello, I'm the RYDAR Privé assistant. This conversation is recorded to process your booking. Tell me where you're leaving from, where you're going and when.",
+  },
+  call: {
+    metaTitle: "Call RYDAR Privé — book your chauffeur by voice, 24/7",
+    metaDescription:
+      "Tap Call: our voice assistant answers right away, in English or French, and books your private chauffeur in Paris and to the airports. Price fixed before departure.",
+    kicker: "Voice assistant · 24/7",
+    title: "Call us, we answer.",
+    lead: "Our assistant answers right away, in English or French: pickup, destination, time, fixed price. Your ride is booked in one minute.",
+    button: "Call",
+    note: "Free, from your browser. Allow the microphone when asked.",
+    steps: ["Tap “Call”", "Allow the microphone", "Say where and when: the assistant takes care of the rest"],
+    online: "Prefer to book online",
   },
   promises: {
     kicker: "Our commitments",

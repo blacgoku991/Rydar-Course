@@ -2,7 +2,7 @@ import type { Dictionary } from "@/i18n";
 import { fill } from "@/i18n";
 import type { VehicleId } from "@/config/pricing";
 import VehicleGlyph from "@/components/booking/VehicleGlyph";
-import VoiceButton from "@/components/voice/VoiceButton";
+import CallButton from "@/components/voice/CallButton";
 import styles from "./Sections.module.css";
 
 /* ---------- Services ---------- */
@@ -166,7 +166,7 @@ export function Steps({ dict }: { dict: Dictionary["steps"] }) {
 
 /* ---------- Téléphone IA ---------- */
 
-export function Voice({ dict, phoneHref, phoneDisplay, price }: { dict: Dictionary["voice"]; phoneHref: string; phoneDisplay: string; price: string }) {
+export function Voice({ dict, price }: { dict: Dictionary["voice"]; price: string }) {
   return (
     <section className={`section ${styles.voiceSection}`} id="telephone" aria-labelledby="voice-title">
       <div className={`container ${styles.voice}`}>
@@ -181,24 +181,14 @@ export function Voice({ dict, phoneHref, phoneDisplay, price }: { dict: Dictiona
               <li key={l}>{l}</li>
             ))}
           </ul>
-          {phoneHref ? (
-            <div className={styles.voiceActions}>
-              <a href={phoneHref} className={`btn btn-primary ${styles.voiceCta}`}>
-                {dict.cta} · {phoneDisplay}
-              </a>
-              <VoiceButton label={dict.talk} className="btn btn-ghost" />
-            </div>
-          ) : (
-            <div className={styles.voicePending}>
-              <p>{dict.pending}</p>
-              <div className={styles.voiceActions}>
-                <VoiceButton label={dict.talk} className={`btn btn-primary ${styles.voiceCta}`} />
-                <a href="#reserver" className="btn btn-ghost">
-                  {dict.bookOnline} <span className="arrow">→</span>
-                </a>
-              </div>
-            </div>
-          )}
+          {/* Pas de ligne téléphonique : « Appeler » lance l'assistant vocal du site (même agent) */}
+          <div className={styles.voiceActions}>
+            <CallButton label={dict.cta} className={`btn btn-primary ${styles.voiceCta}`} />
+            <a href="#reserver" className="btn btn-ghost">
+              {dict.bookOnline} <span className="arrow">→</span>
+            </a>
+          </div>
+          <p className={styles.voiceNote}>{dict.note}</p>
         </div>
         <div className={styles.call} data-reveal style={{ "--reveal-delay": "120ms" } as React.CSSProperties}>
           <div className={styles.callHead}>

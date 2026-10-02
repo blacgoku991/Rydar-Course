@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BUSINESS } from "@/config/business";
+import CallView from "@/components/call/CallView";
 import JsonLd from "@/components/layout/JsonLd";
 import Hero from "@/components/home/Hero";
 import { Faq, FinalCta } from "@/components/home/Sections";
 import styles from "@/components/page/Page.module.css";
+import CallButton from "@/components/voice/CallButton";
 import { getPageContent, type LegalPage, type ServicePage } from "@/content/pages";
 import { contentVars, fillVars } from "@/content/vars";
 import { getDictionary, type Dictionary } from "@/i18n";
 import { isLocale, LOCALES } from "@/i18n/config";
-import { keyFromSlug, PAGE_KEYS, PAGE_SLUGS, pathFor, SERVICE_PAGES, type PageKey } from "@/i18n/routes";
+import { CALL_SLUGS, callPath, keyFromSlug, PAGE_KEYS, PAGE_SLUGS, pathFor, SERVICE_PAGES, type PageKey } from "@/i18n/routes";
 import { VEHICLE_TEXT } from "@/i18n/vehicles";
 import { siteUrl } from "@/lib/env";
 import { fixedFareFrom } from "@/lib/pricing";
@@ -22,7 +23,13 @@ import type { Locale } from "@/lib/types";
 export const dynamicParams = false;
 
 export function generateStaticParams() {
-  return LOCALES.flatMap((lang) => PAGE_KEYS.map((k) => ({ lang, slug: PAGE_SLUGS[k][lang] })));
+  return LOCALES.flatMap((lang) => [...PAGE_KEYS.map((k) => ({ lang, slug: PAGE_SLUGS[k][lang] })), { lang, slug: CALL_SLUGS[lang] }]);
+}
+
+/** Page « Appeler » (lien des publicités) dans la langue demandée, sinon null. */
+async function callPage(params: Promise<{ lang: string; slug: string }>) {
+  const { lang, slug } = await params;
+  return isLocale(lang) && slug === CALL_SLUGS[lang] ? lang : null;
 }
 
 async function resolve(params: Promise<{ lang: string; slug: string }>) {
@@ -39,6 +46,23 @@ function varsFor(content: ServicePage | LegalPage, lang: Locale) {
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ lang: string; slug: string }> }): Promise<Metadata> {
+  const call = await callPage(params);
+  if (call) {
+    const c = getDictionary(call).call;
+    // Page d'atterrissage des publicités : doublon de l'accueil pour les moteurs, non indexée.
+    return {
+      title: { absolute: c.metaTitle },
+      description: c.metaDescription,
+      robots: { index: false, follow: true },
+      alternates: { canonical: callPath(call), languages: { "fr-FR": callPath("fr"), en: callPath("en") } },
+      openGraph: {
+        title: c.metaTitle,
+        description: c.metaDescription,
+        url: callPath(call),
+        images: [{ url: `/${call}/opengraph-image`, width: 1200, height: 630, alt: "RYDAR Privé" }],
+      },
+    };
+  }
   const r = await resolve(params);
   if (!r) return {};
   const vars = varsFor(r.content, r.lang);
@@ -46,6 +70,8 @@ export async function generateMetadata({ params }: { params: Promise<{ lang: str
 }
 
 export default async function Page({ params }: { params: Promise<{ lang: string; slug: string }> }) {
+  const call = await callPage(params);
+  if (call) return <CallView lang={call} dict={getDictionary(call)} />;
   const r = await resolve(params);
   if (!r) notFound();
   const dict = getDictionary(r.lang);
@@ -193,11 +219,7 @@ function ServiceView({ lang, pageKey, content, dict }: { lang: Locale; pageKey: 
               <a href="#reserver" className="btn btn-primary">
                 {dict.page.bookCta}
               </a>
-              {BUSINESS.phoneHref && (
-                <a href={BUSINESS.phoneHref} className="btn btn-ghost">
-                  {dict.nav.call} · {BUSINESS.phoneDisplay}
-                </a>
-              )}
+              <CallButton label={dict.nav.call} className="btn btn-ghost" />
             </div>
           </aside>
         </div>

@@ -100,12 +100,7 @@ export default async function Home({ params }: { params: Promise<{ lang: string 
       <Services dict={dict.services} />
       <Fleet dict={dict.fleet} items={fleetItems(lang)} />
       <Steps dict={dict.steps} />
-      <Voice
-        dict={dict.voice}
-        phoneHref={BUSINESS.phoneHref}
-        phoneDisplay={BUSINESS.phoneDisplay}
-        price={cdgPrice ? formatMoney(cdgPrice.business * 100, lang) : ""}
-      />
+      <Voice dict={dict.voice} price={cdgPrice ? formatMoney(cdgPrice.business * 100, lang) : ""} />
       <Promises dict={dict.promises} airport={BUSINESS.freeWaitingAirportMinutes} other={BUSINESS.freeWaitingOtherMinutes} />
       <Faq title={dict.faq.title} kicker={dict.faq.kicker} items={dict.faq.items} />
       <FinalCta dict={dict.cta} />
