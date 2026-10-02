@@ -1,0 +1,187 @@
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.breadcrumb a:hover {
+  color: var(--text);
+}
+
+.faresSection {
+  padding-top: clamp(40px, 6vw, 80px);
+}
+.tableWrap {
+  overflow-x: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-2);
+  background: var(--ink-2);
+}
+.fares {
+  width: 100%;
+  min-width: 540px;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+.fares th,
+.fares td {
+  padding: 18px 22px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.fares thead th {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--platinum);
+}
+.fares tbody th {
+  font-weight: 500;
+}
+.fares td {
+  font-family: var(--font-display);
+  font-size: 22px;
+}
+.fares tbody tr:last-child th,
+.fares tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.article {
+  display: grid;
+  gap: 48px;
+}
+.prose {
+  display: grid;
+  gap: 48px;
+  max-width: 760px;
+}
+.block {
+  display: grid;
+  gap: 16px;
+}
+.block h2 {
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+}
+.block p {
+  color: var(--text-2);
+  font-size: 17px;
+}
+.block ul {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.block li {
+  position: relative;
+  padding-left: 28px;
+  color: var(--text-2);
+  font-size: 17px;
+}
+.block li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.75em;
+  width: 14px;
+  height: 1px;
+  background: var(--platinum);
+}
+.aside {
+  display: none;
+}
+.asideCard {
+  position: sticky;
+  top: calc(var(--header-h) + 24px);
+  display: grid;
+  gap: 14px;
+  padding: 26px;
+  border-radius: 22px;
+  border: 1px solid var(--line-2);
+  background: linear-gradient(180deg, var(--surface), var(--ink-2));
+}
+.asideTitle {
+  font-family: var(--font-display);
+  font-size: 24px;
+}
+.asidePrice {
+  font-family: var(--font-display);
+  font-size: 36px;
+}
+.asidePrice small {
+  font-family: var(--font-text);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.related {
+  padding: 0 0 clamp(80px, 10vw, 120px);
+}
+.relatedTitle {
+  margin-bottom: 24px;
+  font-size: 13px;
+  font-family: var(--font-text);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--platinum);
+}
+.relatedList {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-2);
+}
+.relatedList a {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line-2);
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 3vw, 2.2rem);
+  transition:
+    padding 0.5s var(--ease),
+    color 0.3s;
+}
+.relatedList a:hover {
+  padding-left: 12px;
+  color: var(--platinum-hi);
+}
+
+.legal {
+  padding: calc(var(--header-h) + 56px) 0 120px;
+}
+.legalTitle {
+  margin: 24px 0 48px;
+  font-size: clamp(2.6rem, 6vw, 4.6rem);
+}
+.notFound {
+  min-height: 80vh;
+  display: flex;
+  align-items: center;
+  padding: calc(var(--header-h) + 40px) 0 80px;
+}
+.notFoundActions {
+  display: flex;
+  gap: 12px;
+}
+
+@media (min-width: 1024px) {
+  .article {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: 80px;
+    align-items: start;
+  }
+  .aside {
+    display: block;
+    height: 100%;
+  }
+}

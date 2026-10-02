@@ -1,0 +1,7 @@
+.boardSection {
+  padding-top: clamp(40px, 6vw, 80px);
+}
+.boardLayout {
+  display: grid;
+  gap: 8px;
+}
