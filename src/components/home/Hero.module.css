@@ -139,10 +139,11 @@
   content: "";
   position: absolute;
   left: 0;
-  top: -40%;
+  top: 0;
   width: 1px;
   height: 40%;
   background: var(--platinum-hi);
+  transform: translateY(-100%);
   animation: drip 2.4s var(--ease) infinite;
 }
 
@@ -157,9 +158,10 @@
     transform: translateY(18px);
   }
 }
+/* Déplacement par transform (sans recalcul de mise en page à chaque image) : de -40 % à 110 % de la hauteur */
 @keyframes drip {
   to {
-    top: 110%;
+    transform: translateY(275%);
   }
 }
 

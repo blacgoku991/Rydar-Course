@@ -225,6 +225,12 @@ p {
   color: transparent;
   animation: sheen 9s var(--ease) infinite;
 }
+/* Téléphone : un seul passage du reflet (le dégradé de texte se redessine à chaque image tant qu'il bouge) */
+@media (pointer: coarse) {
+  .platinum-text {
+    animation-iteration-count: 1;
+  }
+}
 
 @keyframes sheen {
   0%,

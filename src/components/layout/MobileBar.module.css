@@ -17,6 +17,14 @@
     transform 0.5s var(--ease),
     opacity 0.5s var(--ease);
 }
+/* Téléphone : pas de flou d'arrière-plan (barre fixe, recalculé à chaque image en défilant) */
+@media (pointer: coarse) {
+  .bar {
+    background: rgba(11, 14, 17, 0.96);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
 .hidden {
   transform: translateY(140%);
   opacity: 0;
