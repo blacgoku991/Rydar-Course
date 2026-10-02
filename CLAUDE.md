@@ -18,5 +18,5 @@ Site Next.js 16 (App Router, Turbopack) : réservation de chauffeurs FR/EN, assi
 
 - Site : `/api/places` (lieux connus + Géoplateforme IGN + Photon) → `/api/quote` (devis signé) → `/api/booking` → `postBookingToCentral` (Telegram).
 - Téléphone : ElevenLabs appelle `/api/agent/quote` puis `/api/agent/booking` (en-tête `X-Agent-Secret`), récap via `/api/agent/post-call`.
-- Telegram : boutons `rp:<action>:<ref>` traités par `/api/telegram/webhook` ; état lu depuis le message lui-même (sans base de données), verrou via `src/lib/store.ts` (Upstash si configuré).
+- Telegram : groupe = fiche courte + « ✋ JE PRENDS » ; détails client envoyés en privé au chauffeur ; fiche complète à `TELEGRAM_ADMIN_CHAT_ID`. Boutons `rp:<action>:<ref>` traités par `/api/telegram/webhook`. État des courses dans `src/lib/rides.ts` (Vercel Blob privé avec `ifMatch`, sinon KV).
 - `/setup` (protégé par `APP_SECRET`) branche le webhook Telegram et crée/met à jour l'agent ElevenLabs et le numéro Twilio.

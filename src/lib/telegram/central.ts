@@ -1,241 +1,258 @@
 import "server-only";
 import { env } from "@/lib/env";
-import { kv } from "@/lib/store";
+import { logLine, loadRide, recentRides, saveRide, updateRide, type Ride, type RideDriver } from "@/lib/rides";
 import { sendToCentral, tg, TelegramError } from "@/lib/telegram/api";
-import { entitiesToHtml, escapeHtml } from "@/lib/telegram/entities";
-import {
-  bookingMessageHtml,
-  keyboardFor,
-  parisClock,
-  routeUrl,
-  statusFromText,
-  statusHeader,
-  userLink,
-  whatsappUrl,
-  type CentralStatus,
-  type LinkButtons,
-} from "@/lib/telegram/format";
-import type { TgCallbackQuery, TgEntity, TgMessage, TgUpdate, TgUser } from "@/lib/telegram/types";
+import { escapeHtml } from "@/lib/telegram/entities";
+import { adminKeyboard, adminText, driverKeyboard, driverText, groupKeyboard, groupText, parisClock, shortDate, shortPlace } from "@/lib/telegram/format";
+import type { TgCallbackQuery, TgMessage, TgUpdate, TgUser } from "@/lib/telegram/types";
 import type { Booking } from "@/lib/types";
 
-const LOCK_TTL = 60 * 60 * 24 * 120;
+/**
+ * Centrale Telegram :
+ *  - groupe chauffeurs : fiche courte + « ✋ JE PRENDS » (aucune donnée client) ;
+ *  - le chauffeur qui prend reçoit les coordonnées en privé (le bot s'ouvre tout seul la 1re fois) ;
+ *  - l'admin (TELEGRAM_ADMIN_CHAT_ID) suit tout : prix client, commission, historique, annulation.
+ */
 
-/** Publie une réservation dans le groupe centrale. Retourne l'id du message. */
-export async function postBookingToCentral(b: Booking, opts: { test?: boolean } = {}) {
-  const links: LinkButtons = { route: routeUrl(b), whatsapp: whatsappUrl(b.customer.phone) };
-  const msg = await sendToCentral<TgMessage>({
-    text: bookingMessageHtml(b, opts),
-    parse_mode: "HTML",
-    reply_markup: keyboardFor("new", b.ref, links),
-    link_preview_options: { is_disabled: true },
-  });
-  return msg.message_id;
-}
+const HTML = { parse_mode: "HTML", link_preview_options: { is_disabled: true } } as const;
 
-/** Message libre dans la centrale (récapitulatif d'appel, alertes…). */
-export async function notifyCentral(html: string) {
-  return sendToCentral<TgMessage>({ text: html, parse_mode: "HTML", link_preview_options: { is_disabled: true } });
-}
-
-function displayName(u: TgUser) {
+function nameOf(u: TgUser) {
   return [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username || "Chauffeur";
 }
 
-function sameChat(chatId: number) {
-  const configured = env.telegramChatId;
-  return !!configured && String(chatId) === configured.trim();
+function driverOf(u: TgUser): RideDriver {
+  return { id: u.id, name: nameOf(u), username: u.username };
 }
 
-async function isAdmin(chatId: number, user: TgUser) {
-  if (env.telegramAdminIds.includes(String(user.id))) return true;
+async function botUsername() {
+  const g = globalThis as unknown as { __rydarBot?: string };
+  if (!g.__rydarBot) g.__rydarBot = (await tg<{ username: string }>("getMe", {})).username;
+  return g.__rydarBot;
+}
+
+async function sendAdmin(text: string, extra: Record<string, unknown> = {}) {
+  const chat = env.telegramAdminChatId;
+  if (!chat) return null;
+  return tg<TgMessage>("sendMessage", { chat_id: chat, text, ...HTML, ...extra });
+}
+
+/** Modifie un message ; ignore « message is not modified » et les messages supprimés. */
+async function edit(chatId: string | number | undefined, messageId: number | undefined, text: string, reply_markup: unknown) {
+  if (!chatId || !messageId) return;
   try {
-    const member = await tg<{ status: string }>("getChatMember", { chat_id: chatId, user_id: user.id });
-    return member.status === "creator" || member.status === "administrator";
+    await tg("editMessageText", { chat_id: chatId, message_id: messageId, text, reply_markup, ...HTML });
+  } catch (err) {
+    if (err instanceof TelegramError && /not modified|not found|can't be edited/i.test(err.message)) return;
+    console.error("[rydar] édition Telegram", err);
+  }
+}
+
+/** Remet à jour les 3 messages (groupe, admin, chauffeur) d'après l'état de la course. */
+async function refresh(ride: Ride, opts: { driver?: boolean; previousDriver?: RideDriver } = {}) {
+  await edit(env.telegramChatId, ride.groupMsgId, groupText(ride), groupKeyboard(ride));
+  await edit(env.telegramAdminChatId, ride.adminMsgId, adminText(ride), adminKeyboard(ride));
+  const driver = opts.previousDriver ?? ride.driver;
+  if (opts.driver && driver) await edit(driver.id, ride.driverMsgId, driverText(ride), driverKeyboard(ride));
+}
+
+/* ------------------------------------------------------------------ */
+/* Publication                                                         */
+/* ------------------------------------------------------------------ */
+
+export async function postBookingToCentral(b: Booking, opts: { test?: boolean } = {}) {
+  const ride: Ride = {
+    booking: b,
+    status: "open",
+    test: opts.test,
+    log: [logLine(`Reçue (${b.source === "phone" ? "téléphone" : "site"})`, new Date(b.createdAt))],
+  };
+  const group = await sendToCentral<TgMessage>({ text: groupText(ride), reply_markup: groupKeyboard(ride), ...HTML });
+  ride.groupMsgId = group.message_id;
+  try {
+    const admin = await sendAdmin(adminText(ride), { reply_markup: adminKeyboard(ride) });
+    if (admin) ride.adminMsgId = admin.message_id;
+  } catch (err) {
+    console.error("[rydar] fiche admin", err);
+  }
+  await saveRide(ride, null);
+  return group.message_id;
+}
+
+/** Message libre pour l'admin (récapitulatif d'appel…). Sans admin configuré : dans le groupe. */
+export async function notifyCentral(html: string) {
+  if (env.telegramAdminChatId) return sendAdmin(html);
+  return sendToCentral<TgMessage>({ text: html, ...HTML });
+}
+
+/* ------------------------------------------------------------------ */
+/* Actions                                                             */
+/* ------------------------------------------------------------------ */
+
+type Result = { ok: true; message: string } | { ok: false; message: string; openBot?: boolean };
+
+/** Un chauffeur prend la course : verrou, envoi des détails en privé, mise à jour du groupe. */
+export async function takeRide(ref: string, user: TgUser): Promise<Result> {
+  const taken = await updateRide(ref, (r) => {
+    if (r.status !== "open") return null;
+    r.status = "taken";
+    r.driver = driverOf(user);
+    r.log.push(logLine(`✋ Prise par ${r.driver.name}${user.username ? ` (@${user.username})` : ""}`));
+    return r;
+  });
+  if (!taken.ok) {
+    if (taken.reason === "not_found") return { ok: false, message: "Course introuvable." };
+    const cur = await loadRide(ref);
+    if (cur?.ride.driver?.id === user.id && cur.ride.status === "taken") return { ok: true, message: "Elle est déjà à toi 👍" };
+    return { ok: false, message: "Trop tard, cette course est déjà prise." };
+  }
+
+  // Détails en privé. Si le chauffeur n'a jamais ouvert le bot, on annule la prise.
+  let driverMsg: TgMessage;
+  try {
+    driverMsg = await tg<TgMessage>("sendMessage", { chat_id: user.id, text: driverText(taken.ride), reply_markup: driverKeyboard(taken.ride), ...HTML });
   } catch {
-    return false;
+    await updateRide(ref, (r) => {
+      if (r.status !== "taken" || r.driver?.id !== user.id) return null;
+      r.status = "open";
+      r.driver = undefined;
+      r.log.pop();
+      return r;
+    });
+    return { ok: false, openBot: true, message: "Ouvre le bot et appuie sur DÉMARRER : la course te sera attribuée automatiquement." };
   }
+
+  const saved = await updateRide(ref, (r) => {
+    r.driverMsgId = driverMsg.message_id;
+    return r;
+  });
+  await refresh(saved.ok ? saved.ride : taken.ride);
+  return { ok: true, message: "✅ C'est à toi ! Les détails sont dans ta conversation privée avec le bot." };
 }
 
-function linksFromMarkup(msg: TgMessage): LinkButtons {
-  const links: LinkButtons = {};
-  for (const row of msg.reply_markup?.inline_keyboard ?? []) {
-    for (const b of row) {
-      if (!b.url) continue;
-      if (b.url.includes("wa.me")) links.whatsapp = b.url;
-      else links.route = b.url;
+async function driverAction(ref: string, user: TgUser, action: "done" | "rel"): Promise<Result> {
+  const res = await updateRide(ref, (r) => {
+    if (r.status !== "taken" || r.driver?.id !== user.id) return null;
+    if (action === "done") {
+      r.status = "done";
+      r.log.push(logLine(`🏁 Terminée par ${r.driver.name}`));
+    } else {
+      r.status = "open";
+      r.log.push(logLine(`↩️ Libérée par ${r.driver.name}`));
+      r.driver = undefined;
     }
-  }
-  return links;
+    return r;
+  });
+  if (!res.ok) return { ok: false, message: "Action impossible : cette course n'est plus à toi." };
+  await refresh(res.ride, { driver: true, previousDriver: res.before.driver });
+  return { ok: true, message: action === "done" ? "🏁 Merci, course terminée !" : "Course remise en ligne pour les autres chauffeurs." };
 }
 
-/** Identifiant Telegram du chauffeur, lu dans la première ligne du message. */
-export function takerIdFrom(text: string, entities: TgEntity[] = []): number | null {
-  const firstLen = (text.split("\n", 1)[0] ?? "").length;
-  for (const e of entities) {
-    if (e.offset >= firstLen) continue;
-    if (e.type === "text_mention" && e.user) return e.user.id;
-    if (e.type === "text_link" && e.url?.startsWith("tg://user?id=")) return Number(e.url.slice(13)) || null;
+async function adminAction(ref: string, user: TgUser, action: "cancel_yes" | "reopen"): Promise<Result> {
+  const who = nameOf(user);
+  const res = await updateRide(ref, (r) => {
+    if (action === "cancel_yes") {
+      if (r.status !== "open" && r.status !== "taken") return null;
+      r.status = "cancelled";
+      r.log.push(logLine(`❌ Annulée par ${who}`));
+    } else {
+      if (r.status !== "taken" && r.status !== "cancelled") return null;
+      r.status = "open";
+      r.log.push(logLine(`♻️ Remise en ligne par ${who}`));
+      r.driver = undefined;
+    }
+    return r;
+  });
+  if (!res.ok) return { ok: false, message: "Action impossible dans l'état actuel." };
+  await refresh(res.ride, { driver: true, previousDriver: res.before.driver });
+  const prev = res.before.driver;
+  if (prev) {
+    const text =
+      action === "cancel_yes"
+        ? `❌ La course <code>${ref}</code> a été annulée par la centrale.`
+        : `♻️ La centrale a retiré la course <code>${ref}</code> : elle est remise en ligne.`;
+    await tg("sendMessage", { chat_id: prev.id, text, ...HTML }).catch(() => undefined);
   }
-  const m = /#(\d{5,})/.exec(text.slice(0, firstLen));
-  return m ? Number(m[1]) : null;
+  return { ok: true, message: action === "cancel_yes" ? "Course annulée." : "Course remise en ligne." };
 }
 
-async function answer(cq: TgCallbackQuery, text: string, alert = false) {
+/* ------------------------------------------------------------------ */
+/* Webhook                                                             */
+/* ------------------------------------------------------------------ */
+
+const isGroup = (chatId: number) => !!env.telegramChatId && String(chatId) === env.telegramChatId.trim();
+const isAdminChat = (chatId: number) => !!env.telegramAdminChatId && String(chatId) === env.telegramAdminChatId.trim();
+
+async function answer(cq: TgCallbackQuery, text: string, opts: { alert?: boolean; url?: string } = {}) {
   try {
-    await tg("answerCallbackQuery", { callback_query_id: cq.id, text, show_alert: alert });
+    await tg("answerCallbackQuery", { callback_query_id: cq.id, text, show_alert: !!opts.alert, ...(opts.url ? { url: opts.url } : {}) });
   } catch {
     /* expiré */
   }
 }
 
-async function edit(msg: TgMessage, html: string, markup: ReturnType<typeof keyboardFor>, fallbackHtml?: string) {
-  const payload = {
-    chat_id: msg.chat.id,
-    message_id: msg.message_id,
-    parse_mode: "HTML",
-    reply_markup: markup,
-    link_preview_options: { is_disabled: true },
-  };
-  try {
-    await tg("editMessageText", { ...payload, text: html });
-  } catch (err) {
-    if (err instanceof TelegramError && /not modified/i.test(err.message)) return;
-    if (fallbackHtml) {
-      await tg("editMessageText", { ...payload, text: fallbackHtml });
-      return;
-    }
-    throw err;
-  }
-}
-
-function rebuild(msg: TgMessage, header: string, journal: string) {
-  const html = entitiesToHtml(msg.text ?? "", msg.entities ?? []);
-  const nl = html.indexOf("\n");
-  const body = nl >= 0 ? html.slice(nl) : "";
-  return `${header}${body}\n• ${parisClock()} ${journal}`;
-}
-
-/** En-tête avec mention ; variante sans lien si Telegram refuse la mention. */
-function headers(status: CentralStatus, actor: TgUser) {
-  const withLink = statusHeader(status, actor);
-  const plain = withLink.replace(userLink(actor), `${escapeHtml(displayName(actor))} <code>#${actor.id}</code>`);
-  return { withLink, plain };
-}
-
 async function handleCallback(cq: TgCallbackQuery) {
-  const msg = cq.message;
   const m = /^rp:([a-z_]+):([A-Z0-9-]{4,20})$/.exec(cq.data ?? "");
-  if (!msg || !m) return answer(cq, "Action inconnue.");
-  if (!sameChat(msg.chat.id)) return answer(cq, "Ce groupe n'est pas la centrale configurée.", true);
+  const chatId = cq.message?.chat.id;
+  if (!m || chatId === undefined) return answer(cq, "Action inconnue.");
   const [, action, ref] = m;
-  const text = msg.text ?? "";
-  if (!text.includes(ref)) return answer(cq, "Message introuvable.");
-  const status = statusFromText(text);
-  const links = linksFromMarkup(msg);
-  const from = cq.from;
-  const name = escapeHtml(displayName(from));
-  const lockKey = `take:${ref}`;
 
-  switch (action) {
-    case "take": {
-      if (status !== "new") return answer(cq, "Cette course est déjà attribuée.", true);
-      const locked = await kv().setNX(lockKey, String(from.id), LOCK_TTL);
-      if (!locked) {
-        const holder = await kv().get(lockKey);
-        if (holder !== String(from.id)) return answer(cq, "Trop tard : un autre chauffeur vient de la prendre.", true);
-      }
-      const h = headers("taken", from);
-      await edit(msg, rebuild(msg, h.withLink, `✅ Prise par ${name}`), keyboardFor("taken", ref, links), rebuild(msg, h.plain, `✅ Prise par ${name}`));
-      await answer(cq, "✅ Course attribuée. Bonne route !");
-      await sendDriverCopy(from, msg);
-      return;
-    }
-    case "release":
-    case "done": {
-      if (status !== "taken") return answer(cq, "Action impossible dans l'état actuel.", true);
-      const taker = takerIdFrom(text, msg.entities);
-      if (taker !== from.id && !(await isAdmin(msg.chat.id, from))) {
-        return answer(cq, "Seul le chauffeur attribué ou un admin peut faire ça.", true);
-      }
-      if (action === "release") {
-        await kv().del(lockKey);
-        await edit(msg, rebuild(msg, statusHeader("new"), `↩️ Libérée par ${name}`), keyboardFor("new", ref, links));
-        return answer(cq, "Course remise à disposition.");
-      }
-      const firstLine = entitiesToHtml(text, msg.entities).split("\n", 1)[0] ?? "";
-      const doneHeader = firstLine.replace(/^✅ <b>ATTRIBUÉE<\/b>/, "🏁 <b>TERMINÉE</b>");
-      await edit(msg, rebuild(msg, doneHeader, `🏁 Terminée (${name})`), keyboardFor("done", ref, links));
-      return answer(cq, "🏁 Course terminée. Merci !");
-    }
-    case "cancel": {
-      if (status !== "new" && status !== "taken") return answer(cq, "Action impossible.");
-      if (!(await isAdmin(msg.chat.id, from))) return answer(cq, "Seuls les admins de la centrale peuvent annuler.", true);
-      await tg("editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: keyboardFor("confirm_cancel", ref, links) });
-      return answer(cq, "Confirmez l'annulation.");
-    }
-    case "cancel_no": {
-      const back = status === "taken" ? "taken" : status === "new" ? "new" : null;
-      if (back) await tg("editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: keyboardFor(back, ref, links) });
-      return answer(cq, "OK");
-    }
-    case "cancel_yes": {
-      if (status !== "new" && status !== "taken") return answer(cq, "Action impossible.");
-      if (!(await isAdmin(msg.chat.id, from))) return answer(cq, "Seuls les admins de la centrale peuvent annuler.", true);
-      await kv().del(lockKey);
-      const h = headers("cancelled", from);
-      await edit(
-        msg,
-        rebuild(msg, h.withLink, `❌ Annulée par ${name}`),
-        keyboardFor("cancelled", ref, links),
-        rebuild(msg, h.plain, `❌ Annulée par ${name}`),
-      );
-      return answer(cq, "Course annulée.");
-    }
-    case "restore": {
-      if (status !== "cancelled") return answer(cq, "Action impossible.");
-      if (!(await isAdmin(msg.chat.id, from))) return answer(cq, "Réservé aux admins.", true);
-      await edit(msg, rebuild(msg, statusHeader("new"), `♻️ Rétablie par ${name}`), keyboardFor("new", ref, links));
-      return answer(cq, "Course remise en ligne.");
-    }
-    default:
-      return answer(cq, "Action inconnue.");
+  if (action === "take") {
+    if (!isGroup(chatId)) return answer(cq, "Ce groupe n'est pas la centrale configurée.", { alert: true });
+    const r = await takeRide(ref, cq.from);
+    if (!r.ok && r.openBot) return answer(cq, r.message, { url: `https://t.me/${await botUsername()}?start=t_${ref}` });
+    return answer(cq, r.message, { alert: !r.ok });
   }
-}
 
-/** Copie privée de la course au chauffeur (si celui-ci a démarré le bot). */
-async function sendDriverCopy(driver: TgUser, msg: TgMessage) {
-  try {
-    const html = entitiesToHtml(msg.text ?? "", msg.entities ?? []);
-    const nl = html.indexOf("\n");
-    const journal = html.lastIndexOf("\n<i>Journal</i>");
-    const body = html.slice(nl + 1, journal > nl ? journal : undefined);
-    await tg("sendMessage", {
-      chat_id: driver.id,
-      text: `✅ <b>Course attribuée</b>\n${body}`,
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-      reply_markup: {
-        inline_keyboard: [
-          Object.entries(linksFromMarkup(msg)).map(([k, url]) => ({ text: k === "route" ? "🗺 Itinéraire" : "💬 WhatsApp client", url })),
-        ].filter((r) => r.length),
-      },
-    });
-  } catch {
-    // Le chauffeur n'a pas démarré le bot en privé : rien de grave.
+  if (action === "done" || action === "rel") {
+    if (cq.message?.chat.type !== "private") return answer(cq, "Action réservée au chauffeur, en privé.");
+    const r = await driverAction(ref, cq.from, action);
+    return answer(cq, r.message, { alert: !r.ok });
   }
+
+  if (!isAdminChat(chatId)) return answer(cq, "Réservé à l'admin.", { alert: true });
+  if (action === "cancel" || action === "cancel_no") {
+    const cur = await loadRide(ref);
+    if (!cur) return answer(cq, "Course introuvable.");
+    await tg("editMessageReplyMarkup", {
+      chat_id: chatId,
+      message_id: cq.message!.message_id,
+      reply_markup: adminKeyboard(cur.ride, action === "cancel"),
+    }).catch(() => undefined);
+    return answer(cq, action === "cancel" ? "Confirmer l'annulation ?" : "OK");
+  }
+  if (action === "cancel_yes" || action === "reopen") {
+    const r = await adminAction(ref, cq.from, action);
+    return answer(cq, r.message, { alert: !r.ok });
+  }
+  return answer(cq, "Action inconnue.");
 }
 
 async function reply(chatId: number, html: string, threadId?: number) {
-  await tg("sendMessage", { chat_id: chatId, text: html, parse_mode: "HTML", ...(threadId ? { message_thread_id: threadId } : {}) });
+  await tg("sendMessage", { chat_id: chatId, text: html, ...HTML, ...(threadId ? { message_thread_id: threadId } : {}) });
 }
 
-function chatIdHelp(chatId: number) {
+function chatIdHelp(chatId: number, isPrivate: boolean) {
   return [
     "👋 <b>Bot RYDAR Privé</b>",
     `ID de cette discussion : <code>${chatId}</code>`,
     "",
-    "Pour en faire votre centrale, mettez cette valeur dans la variable <code>TELEGRAM_CHAT_ID</code> (Vercel → Settings → Environment Variables), puis redéployez.",
+    isPrivate
+      ? "Pour recevoir ici les fiches admin (prix client, commission, historique), mettez cette valeur dans <code>TELEGRAM_ADMIN_CHAT_ID</code>."
+      : "Pour en faire le groupe des chauffeurs, mettez cette valeur dans <code>TELEGRAM_CHAT_ID</code>.",
   ].join("\n");
+}
+
+const STATUS_ICON: Record<Ride["status"], string> = { open: "🟡", taken: "🟢", done: "🏁", cancelled: "❌" };
+
+async function listCourses(chatId: number) {
+  const rides = await recentRides(15);
+  if (!rides.length) return reply(chatId, "Aucune course enregistrée pour l'instant.");
+  const lines = rides.map((r) => {
+    const b = r.booking;
+    const dest = b.dropoff ? shortPlace(b.dropoff) : `MAD ${b.hours}H`;
+    return `${STATUS_ICON[r.status]} <code>${b.ref}</code> ${escapeHtml(shortDate(b.date))} ${b.time} · ${escapeHtml(shortPlace(b.pickup))} ➜ ${escapeHtml(dest)}${r.driver ? ` · ${escapeHtml(r.driver.name)}` : ""}`;
+  });
+  return reply(chatId, ["<b>Dernières courses</b>", "🟡 en attente · 🟢 attribuée · 🏁 terminée · ❌ annulée", "", ...lines].join("\n"));
 }
 
 export async function handleTelegramUpdate(update: TgUpdate) {
@@ -244,18 +261,31 @@ export async function handleTelegramUpdate(update: TgUpdate) {
   const mcm = update.my_chat_member;
   if (mcm && (mcm.chat.type === "group" || mcm.chat.type === "supergroup")) {
     const st = mcm.new_chat_member.status;
-    if ((st === "member" || st === "administrator") && !sameChat(mcm.chat.id)) await reply(mcm.chat.id, chatIdHelp(mcm.chat.id));
+    if ((st === "member" || st === "administrator") && !isGroup(mcm.chat.id)) await reply(mcm.chat.id, chatIdHelp(mcm.chat.id, false));
     return;
   }
 
   const msg = update.message;
-  const cmd = msg?.text?.trim().split(/\s|@/, 1)[0]?.toLowerCase();
-  if (!msg || !cmd) return;
-  if (cmd === "/id" || cmd === "/chatid") return reply(msg.chat.id, chatIdHelp(msg.chat.id), msg.message_thread_id);
-  if (cmd === "/start" && msg.chat.type === "private") {
+  const text = msg?.text?.trim() ?? "";
+  if (!msg || !text.startsWith("/")) return;
+  const [rawCmd, arg] = text.split(/\s+/, 2);
+  const cmd = rawCmd.split("@")[0].toLowerCase();
+  const isPrivate = msg.chat.type === "private";
+
+  if (cmd === "/id" || cmd === "/chatid") return reply(msg.chat.id, chatIdHelp(msg.chat.id, isPrivate), msg.message_thread_id);
+
+  if (cmd === "/courses" && (isAdminChat(msg.chat.id) || isGroup(msg.chat.id))) return listCourses(msg.chat.id);
+
+  if (cmd === "/start" && isPrivate && msg.from) {
+    const take = /^t_([A-Z0-9-]{4,20})$/.exec(arg ?? "");
+    if (take) {
+      const r = await takeRide(take[1], msg.from);
+      if (!r.ok) return reply(msg.chat.id, escapeHtml(r.message));
+      return;
+    }
     return reply(
       msg.chat.id,
-      "👋 Bonjour ! Je suis le bot de la centrale <b>RYDAR Privé</b>.\nQuand vous prenez une course dans le groupe, vous en recevez ici une copie privée.",
+      `👋 Bonjour ${escapeHtml(nameOf(msg.from))} ! Je suis le bot de la centrale <b>RYDAR Privé</b>.\nQuand tu appuies sur « ✋ JE PRENDS » dans le groupe, tu reçois ici les détails de la course (client, adresses, téléphone).\n\n<i>${parisClock()}</i>`,
     );
   }
 }

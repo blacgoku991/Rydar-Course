@@ -4,6 +4,7 @@ import { agentLanguages, ElevenLabsError, setupPhoneNumber, setupVoiceAgent } fr
 import { env, hasSecretBase, siteUrl } from "@/lib/env";
 import { jsonError, readJson } from "@/lib/http";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { rideStorageKind } from "@/lib/rides";
 import { kv } from "@/lib/store";
 import { sendToCentral, telegramConfigured, tg } from "@/lib/telegram/api";
 import { postBookingToCentral } from "@/lib/telegram/central";
@@ -29,7 +30,8 @@ async function status() {
     store: kv().kind,
     commissionPercent: BUSINESS.commissionPercent,
     phoneDisplayed: BUSINESS.phoneDisplay || null,
-    telegram: { token: !!env.telegramToken, chatId: env.telegramChatId ?? null },
+    telegram: { token: !!env.telegramToken, chatId: env.telegramChatId ?? null, adminChatId: env.telegramAdminChatId ?? null },
+    rides: rideStorageKind(),
     elevenlabs: {
       apiKey: !!env.elevenlabsApiKey,
       agentId: env.elevenlabsAgentId ?? null,
@@ -70,8 +72,20 @@ async function connectTelegram() {
   });
   let message = `Webhook Telegram branché sur ${url}.`;
   if (telegramConfigured()) {
-    await sendToCentral({ text: "✅ <b>Centrale RYDAR Privé connectée.</b>\nLes nouvelles réservations arriveront ici.", parse_mode: "HTML" });
+    await sendToCentral({
+      text: "✅ <b>Centrale RYDAR Privé connectée.</b>\nLes courses arriveront ici. Appuyez sur « ✋ JE PRENDS » pour en prendre une : les détails client vous sont envoyés en privé.",
+      parse_mode: "HTML",
+    });
     message += " Message de test envoyé dans le groupe.";
+    if (env.telegramAdminChatId) {
+      await tg("sendMessage", {
+        chat_id: env.telegramAdminChatId,
+        text: "✅ <b>Vous recevrez ici les fiches admin</b> (prix client, commission, chauffeur, historique). Tapez /courses pour la liste.",
+        parse_mode: "HTML",
+      });
+    } else {
+      message += " Pour les fiches admin privées : envoyez /id au bot en privé et mettez le numéro dans TELEGRAM_ADMIN_CHAT_ID.";
+    }
   } else {
     message += " Ajoutez maintenant le bot à votre groupe et tapez /id pour obtenir TELEGRAM_CHAT_ID.";
   }

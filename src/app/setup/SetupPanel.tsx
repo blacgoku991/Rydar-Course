@@ -9,7 +9,17 @@ type Status = {
   store: "redis" | "memory";
   commissionPercent: number;
   phoneDisplayed: string | null;
-  telegram: { token: boolean; chatId: string | null; bot?: string; webhookUrl?: string | null; webhookOk?: boolean; lastError?: string | null; error?: string };
+  rides: string;
+  telegram: {
+    token: boolean;
+    chatId: string | null;
+    adminChatId: string | null;
+    bot?: string;
+    webhookUrl?: string | null;
+    webhookOk?: boolean;
+    lastError?: string | null;
+    error?: string;
+  };
   elevenlabs: { apiKey: boolean; agentId: string | null; voiceId: string | null; languages: string[]; webhookSecret: boolean };
   twilio: { configured: boolean; number: string | null };
   humanTransfer: boolean;
@@ -103,6 +113,16 @@ export default function SetupPanel() {
             <ul className={styles.list}>
               <Item ok={status.telegram.token} label="TELEGRAM_BOT_TOKEN" detail={status.telegram.bot ?? status.telegram.error} />
               <Item ok={!!status.telegram.chatId} label="TELEGRAM_CHAT_ID" detail={status.telegram.chatId ?? "Ajoutez le bot au groupe puis tapez /id"} />
+              <Item
+                ok={!!status.telegram.adminChatId}
+                label="TELEGRAM_ADMIN_CHAT_ID (fiches admin)"
+                detail={status.telegram.adminChatId ?? "Envoyez /id au bot en privé"}
+              />
+              <Item
+                ok={status.rides === "blob" || status.rides === "redis"}
+                label="Suivi des courses"
+                detail={status.rides === "blob" ? "Vercel Blob (privé)" : status.rides === "redis" ? "Upstash Redis" : "Mémoire temporaire"}
+              />
               <Item ok={!!status.telegram.webhookOk} label="Webhook" detail={status.telegram.lastError ?? status.telegram.webhookUrl ?? "non branché"} />
             </ul>
             <div className={styles.actions}>

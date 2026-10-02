@@ -27,6 +27,10 @@ export const env = {
   get telegramChatId() {
     return clean(process.env.TELEGRAM_CHAT_ID);
   },
+  /** Chat privé de l'admin (ou groupe admin) : reçoit les fiches complètes (prix client, commission, client). */
+  get telegramAdminChatId() {
+    return clean(process.env.TELEGRAM_ADMIN_CHAT_ID);
+  },
   /** Optionnel : sujet (topic) d'un groupe forum Telegram. */
   get telegramThreadId() {
     const v = clean(process.env.TELEGRAM_THREAD_ID);

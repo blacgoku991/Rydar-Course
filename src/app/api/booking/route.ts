@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createBooking } from "@/lib/booking";
 import { ConfigError } from "@/lib/env";
 import { jsonError, jsonOk, localeOf, readJson } from "@/lib/http";
@@ -20,7 +21,10 @@ export async function POST(req: Request) {
   try {
     const verified = verifyQuote(body.token);
     if (!verified.ok) return jsonError(verified.error === "expired" ? "quote_expired" : "quote_invalid");
-    const idem = typeof body.idempotencyKey === "string" && /^[\w-]{8,80}$/.test(body.idempotencyKey) ? body.idempotencyKey : `${ip}:${body.token}`;
+    const idem =
+      typeof body.idempotencyKey === "string" && /^[\w-]{8,80}$/.test(body.idempotencyKey)
+        ? body.idempotencyKey
+        : createHash("sha256").update(`${ip}:${String(body.token)}:${String(body.vehicle)}`).digest("hex");
     const result = await createBooking({
       payload: verified.payload,
       customer: {

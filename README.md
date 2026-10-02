@@ -45,13 +45,19 @@ Toutes les variables sont décrites dans [`.env.example`](.env.example).
 4. Créez votre groupe « Centrale », ajoutez-y le bot et vos chauffeurs, puis passez le bot **administrateur**. Le bot affiche l'ID du groupe ; sinon tapez `/id`.
 5. Ajoutez la variable `TELEGRAM_CHAT_ID` (ex. `-1001234567890`), redéployez, puis cliquez **Brancher Telegram** une seconde fois sur `/setup`. Pour essayer les boutons, utilisez **Envoyer une course test**.
 
-**Dans le groupe :**
+**Comment ça marche :**
 
-- Un chauffeur appuie sur **🚘 Je prends la course** : la course est à lui, et elle est bloquée pour les autres.
-- Il reçoit aussi une copie privée s'il a démarré le bot en privé (`/start`).
-- **↩️ Libérer** remet la course en ligne. Ce bouton est réservé au chauffeur attribué ou à un admin.
-- **❌ Annuler** demande une confirmation et est réservé aux admins du groupe (ou à `TELEGRAM_ADMIN_IDS`). **♻️ Rétablir** annule une annulation.
-- Les boutons 🗺 Itinéraire et 💬 WhatsApp client sont prêts à l'emploi.
+- **Le groupe des chauffeurs** reçoit une fiche ultra courte, sans aucune info client. Exemple : `SAM 05/10 · 07:45 · B` / `ANTONY ➜ GARE SAINT-LAZARE` / `48 €` (part chauffeur). Elle a un seul bouton : **✋ JE PRENDS**.
+- **Le premier qui appuie** gagne la course, même en cas de clics simultanés. La fiche du groupe devient « ✅ Prise par Ali ».
+- Le chauffeur reçoit **en privé** l'adresse exacte, le nom et le téléphone du client, avec les boutons Itinéraire, WhatsApp, 🏁 Course terminée et ↩️ Libérer.
+  - S'il n'a jamais ouvert le bot, Telegram l'ouvre automatiquement.
+  - Il appuie sur « Démarrer » et la course lui est attribuée.
+- **L'admin seulement** reçoit une fiche complète dans son chat privé avec le bot.
+  - Elle contient le prix client, la part chauffeur, la commission, le client, et l'historique horodaté (reçue, prise par qui, terminée…).
+  - Elle a les boutons ❌ Annuler et ♻️ Remettre en ligne.
+  - Pour l'activer : envoyez `/id` au bot en privé et mettez le numéro dans `TELEGRAM_ADMIN_CHAT_ID`.
+- La commande `/courses` affiche les 15 dernières courses avec leur statut.
+- Le suivi des courses est stocké dans un **Vercel Blob privé** (variable `BLOB_READ_WRITE_TOKEN`, créée automatiquement en connectant un Blob store au projet).
 
 ## 3. Brancher l'IA téléphonique (≈ 20 min)
 
