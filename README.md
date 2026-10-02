@@ -105,7 +105,7 @@ Avec Rydar Drive, les réservations du site, du téléphone et de l'assistant vo
    - `RYDAR_DRIVE_URL`, par exemple `https://rydardrive.com` ;
    - `RYDAR_DRIVE_API_KEY` (type _Sensitive_).
 3. Redéployez.
-4. Sur `/setup`, cliquez **Tester Rydar Drive**, puis **Activer le suivi en direct**. Le site s'inscrit lui-même auprès de Rydar Drive, avec un secret tiré d'`APP_SECRET` : rien à recopier. Quelques secondes plus tard, cliquez sur **Vérifier** : la ligne « Dernier avis reçu de Rydar Drive » doit afficher l'avis de test.
+4. Sur `/setup`, cliquez **Tester Rydar Drive**, puis **Activer le suivi en direct**. Le site s'inscrit lui-même auprès de Rydar Drive, avec un secret tiré d'`APP_SECRET` : rien à recopier. Quelques secondes plus tard, cliquez sur **Vérifier** : la ligne « Suivi en direct » indique « dernier avis livré selon Rydar Drive » avec l'heure de l'avis de test, et la ligne « Dernier avis reçu de Rydar Drive » l'affiche aussi. Sans Upstash, cette dernière ne voit que les avis reçus par l'instance qui affiche la page : l'heure donnée par Rydar Drive fait foi.
 
 **Suivi en direct :** à chaque étape (chauffeur attribué, en route, sur place, client à bord, terminée, annulée, heure modifiée…), Rydar Drive prévient le site (`/api/drive/webhook`, avis signés). La fiche admin Telegram se met à jour toute seule, avec le chauffeur et l'historique. Vous recevez en plus un message :
 
@@ -114,13 +114,15 @@ Avec Rydar Drive, les réservations du site, du téléphone et de l'assistant vo
 
 Le bouton « 🔄 Actualiser » reste disponible. Après un changement d'`APP_SECRET` (ou de `RYDAR_DRIVE_WEBHOOK_SECRET`), cliquez de nouveau sur **Activer le suivi en direct**.
 
-**Ce qui est envoyé :** adresses et coordonnées, date et heure, client, passagers, bagages, catégorie (Berline → `business`, Van → `van`, Prestige → `first`), prix client, numéro de vol et référence RP-…. La référence sert aussi de clé anti-doublon.
+**Ce qui est envoyé :** adresses et coordonnées, date et heure, client, passagers, bagages, catégorie (Berline → `business`, Van → `van`, Prestige → `first`), prix client, numéro de vol et référence RP-…. La clé anti-doublon combine la référence et l'instant de la réservation : une référence tirée de nouveau des années plus tard ne renvoie jamais une ancienne course.
 
 **Sécurités :**
 
 - Si Rydar Drive refuse ou ne répond pas, la course part dans le **groupe Telegram**, avec le bouton « JE PRENDS ». L'historique indique la raison.
 - Les courses test de `/setup` ne sont jamais envoyées à Rydar Drive.
-- Les avis de Rydar Drive sont vérifiés (signature, heure) et traités une seule fois ; un avis arrivé en retard ne fait jamais reculer une course. Les courses créées directement dans Rydar Drive sont ignorées.
+- Les avis de Rydar Drive sont vérifiés (signature, heure) et traités une seule fois ; un avis arrivé en retard ne fait jamais reculer une course. Un avis dont le traitement a été interrompu (plantage, délai dépassé) n'est pas compté comme traité : le renvoi l'applique. Les courses créées directement dans Rydar Drive sont ignorées.
+- Un avis arrivé avant que le site ait enregistré la course (réservation en cours) n'est pas perdu : il est appliqué dès l'enregistrement, et Rydar Drive le renvoie de toute façon une minute plus tard.
+- Si la course est déplacée dans Rydar Drive, la fiche admin affiche la nouvelle heure, l'ancienne barrée.
 - Si le site ne répond pas, Rydar Drive renvoie l'avis plus tard (pendant environ 2 jours).
 
 ## Lien publicité (Meta Ads, Google…)

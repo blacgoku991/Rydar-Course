@@ -7,7 +7,7 @@ import { commissionSplit } from "@/lib/pricing";
 import type { Ride } from "@/lib/rides";
 import { escapeHtml } from "@/lib/telegram/entities";
 import type { TgInlineButton } from "@/lib/telegram/types";
-import { addDays, formatDateLong, formatMoney, nowInZone } from "@/lib/time";
+import { addDays, formatDateLong, formatMoney, nowInZone, zonedToUtc } from "@/lib/time";
 import type { Booking, Place } from "@/lib/types";
 
 /**
@@ -88,8 +88,27 @@ function routeLine(b: Booking) {
   return `${from} ➜ ${b.dropoff ? shortPlace(b.dropoff) : "?"}`;
 }
 
-function headLine(b: Booking) {
-  return `${shortDate(b.date)} · ${b.time} · ${VEHICLE_CODE[b.vehicle]}`;
+/**
+ * Date et heure de prise en charge (Paris) : celles de Rydar Drive quand la course y a été déplacée
+ * (avis « heure modifiée »), sinon celles de la réservation. `moved` : différentes de la réservation.
+ */
+export function pickupOf(ride: Ride): { date: string; time: string; moved: boolean } {
+  const b = ride.booking;
+  const at = ride.drive?.pickupAt ? Date.parse(ride.drive.pickupAt) : NaN;
+  if (!Number.isFinite(at)) return { date: b.date, time: b.time, moved: false };
+  const booked = zonedToUtc(b.date, b.time)?.getTime();
+  if (booked !== undefined && Math.floor(booked / 60000) === Math.floor(at / 60000)) return { date: b.date, time: b.time, moved: false };
+  const local = nowInZone(new Date(at));
+  return { date: local.date, time: local.time, moved: local.date !== b.date || local.time !== b.time };
+}
+
+function headLine(b: Booking, when: { date: string; time: string } = b) {
+  return `${shortDate(when.date)} · ${when.time} · ${VEHICLE_CODE[b.vehicle]}`;
+}
+
+/** « 10/10 09:30 » */
+function dayMonthTime(date: string, time: string) {
+  return `${date.slice(8, 10)}/${date.slice(5, 7)} ${time}`;
 }
 
 function extrasLine(b: Booking) {
@@ -198,7 +217,7 @@ export function driverKeyboard(ride: Ride) {
 export function driveAlertText(ride: Ride, kind: "no_driver" | "cancelled"): string {
   const b = ride.booking;
   const n = ride.drive?.number ? ` · n° ${ride.drive.number}` : "";
-  const what = `<code>${b.ref}</code>${n} · ${escapeHtml(headLine(b))} · ${escapeHtml(routeLine(b))}`;
+  const what = `<code>${b.ref}</code>${n} · ${escapeHtml(headLine(b, pickupOf(ride)))} · ${escapeHtml(routeLine(b))}`;
   return kind === "no_driver"
     ? [
         "⚠️ <b>Rydar Drive : aucun chauffeur trouvé</b>",
@@ -216,6 +235,15 @@ const ADMIN_STATUS: Record<Ride["status"], string> = {
   cancelled: "❌ ANNULÉE",
 };
 
+/** Ligne 📅 de la fiche admin ; heure déplacée dans Rydar Drive : la nouvelle, et l'ancienne barrée. */
+function pickupLine(ride: Ride) {
+  const b = ride.booking;
+  const p = pickupOf(ride);
+  const line = `📅 ${escapeHtml(capitalized(formatDateLong(p.date, "fr")))} · <b>${p.time}</b>`;
+  if (!p.moved) return line;
+  return `${line} (déplacée, initialement <s>${p.date === b.date ? b.time : dayMonthTime(b.date, b.time)}</s>)`;
+}
+
 export function adminText(ride: Ride): string {
   const b = ride.booking;
   const source = b.source === "phone" ? "📞 Téléphone IA" : b.source === "voice" ? "🎙️ Assistant vocal (site)" : "🌐 Site";
@@ -227,7 +255,7 @@ export function adminText(ride: Ride): string {
     head,
     `<code>${b.ref}</code> · ${source} (${b.locale.toUpperCase()})${ride.test ? " · 🧪 TEST" : ""}`,
     "",
-    `📅 ${escapeHtml(capitalized(formatDateLong(b.date, "fr")))} · <b>${b.time}</b>`,
+    pickupLine(ride),
     `📍 ${escapeHtml(frName(b.pickup))}`,
   ];
   if (b.service === "hourly") lines.push(`⏱ Mise à disposition ${b.hours} h`);

@@ -1,8 +1,9 @@
 import "server-only";
 import { cancelDriveRide, DRIVE_FINAL, DRIVE_STATUS_FR, DriveError, getDriveRide, type DriveRide } from "@/lib/drive";
-import { driveAlertKind, mergeDriveRide } from "@/lib/drive-sync";
+import { driveAlertKind, EARLY_DRIVE_WINDOW_MS, isNewerDriveRide, mergeDriveRide, trimDriveRide } from "@/lib/drive-sync";
 import { env } from "@/lib/env";
 import { logLine, loadRide, recentRides, saveRide, updateRide, type Ride, type RideDriver } from "@/lib/rides";
+import { kv } from "@/lib/store";
 import { sendToCentral, tg, TelegramError } from "@/lib/telegram/api";
 import { escapeHtml } from "@/lib/telegram/entities";
 import {
@@ -75,29 +76,101 @@ async function refresh(ride: Ride, opts: { driver?: boolean; previousDriver?: Ri
 /* Publication                                                         */
 /* ------------------------------------------------------------------ */
 
+/** Enregistre une nouvelle course ; false (journalisé) si l'enregistrement échoue ou si la référence existe déjà. */
+async function storeNewRide(ride: Ride) {
+  const saved = await saveRide(ride, null).catch((err) => {
+    console.error("[rydar] enregistrement de la course", ride.booking.ref, err);
+    return false;
+  });
+  if (!saved) console.error("[rydar] course non enregistrée (référence déjà utilisée ou stockage indisponible)", ride.booking.ref);
+  return saved;
+}
+
+/** Avis Rydar Drive gardé de côté pour une course pas encore enregistrée (voir holdEarlyDriveRide). */
+const earlyKey = (ref: string) => `drivewh:early:${ref}`;
+
+/**
+ * Garde de côté un avis Rydar Drive arrivé avant l'enregistrement de la course RP-… (la réservation est en cours) :
+ * il sera appliqué dès l'enregistrement (postBookingToCentral), seulement s'il porte le même id de course Rydar Drive
+ * que celui reçu à la création. Le plus récent est gardé. Les erreurs de stockage remontent.
+ */
+export async function holdEarlyDriveRide(ref: string, remote: DriveRide) {
+  const store = kv();
+  const raw = await store.get(earlyKey(ref));
+  if (raw) {
+    try {
+      if (!isNewerDriveRide(JSON.parse(raw) as DriveRide, remote)) return;
+    } catch {
+      /* valeur illisible : remplacée */
+    }
+  }
+  await store.set(earlyKey(ref), JSON.stringify(trimDriveRide(remote)), Math.ceil(EARLY_DRIVE_WINDOW_MS / 1000));
+}
+
+/** Applique l'avis gardé de côté pour cette course, s'il y en a un (jamais bloquant). */
+async function applyEarlyDriveRide(ride: Ride): Promise<Ride> {
+  const ref = ride.booking.ref;
+  try {
+    const store = kv();
+    const raw = await store.get(earlyKey(ref));
+    if (!raw) return ride;
+    await store.del(earlyKey(ref));
+    const remote = JSON.parse(raw) as DriveRide;
+    const res = await updateRide(ref, (r) => mergeDriveRide(r, remote));
+    return res.ok ? res.ride : ride;
+  } catch (err) {
+    console.error("[rydar] avis Rydar Drive arrivé avant la course", ref, err);
+    return ride;
+  }
+}
+
 export async function postBookingToCentral(b: Booking, opts: { test?: boolean; drive?: DriveRide; driveError?: string } = {}) {
-  const ride: Ride = {
+  let ride: Ride = {
     booking: b,
     status: "open",
     test: opts.test,
     log: [logLine(`Reçue (${b.source === "phone" ? "téléphone" : b.source === "voice" ? "assistant vocal" : "site"})`, new Date(b.createdAt))],
   };
+  let saved = false;
   if (opts.drive) {
     ride.drive = { id: opts.drive.id, number: opts.drive.number, status: opts.drive.status };
     if (typeof opts.drive.pickup_at === "string") ride.drive.pickupAt = opts.drive.pickup_at;
     ride.log.push(logLine(`🚀 Envoyée à Rydar Drive${opts.drive.number ? ` (n° ${opts.drive.number})` : ""}`));
+    // Enregistrée AVANT la fiche admin : Rydar Drive envoie ses avis (course créée, chauffeur attribué…) dès la
+    // création de la course, sans attendre Telegram. Un avis arrivé encore plus tôt a été gardé de côté.
+    saved = await storeNewRide(ride);
+    if (saved) ride = await applyEarlyDriveRide(ride);
   } else {
     if (opts.driveError) ride.log.push(logLine(`⚠️ Rydar Drive a refusé (${opts.driveError.slice(0, 160)}) : envoyée au groupe`));
     const group = await sendToCentral<TgMessage>({ text: groupText(ride), reply_markup: groupKeyboard(ride), ...HTML });
     ride.groupMsgId = group.message_id;
   }
+  const shown = adminText(ride);
   try {
-    const admin = await sendAdmin(adminText(ride), { reply_markup: adminKeyboard(ride) });
+    const admin = await sendAdmin(shown, { reply_markup: adminKeyboard(ride) });
     if (admin) ride.adminMsgId = admin.message_id;
   } catch (err) {
     console.error("[rydar] fiche admin", err);
   }
-  await saveRide(ride, null);
+  if (!opts.drive) saved = await storeNewRide(ride);
+  else if (saved && ride.adminMsgId) {
+    const adminMsgId = ride.adminMsgId;
+    const res = await updateRide(b.ref, (r) => {
+      r.adminMsgId = adminMsgId;
+      return r;
+    }).catch((err) => {
+      console.error("[rydar] fiche admin : enregistrement du message", b.ref, err);
+      return null;
+    });
+    // Un avis appliqué pendant l'envoi de la fiche : elle est remise à jour.
+    if (res?.ok && adminText(res.ride) !== shown) await edit(env.telegramAdminChatId, adminMsgId, adminText(res.ride), adminKeyboard(res.ride));
+  }
+  if (!saved && !opts.test) {
+    await alertAdmin(
+      ride,
+      `⚠️ <b>Course <code>${b.ref}</code> non enregistrée</b>\nLes boutons et le suivi en direct ne fonctionneront pas pour cette course : suivez-la à la main.`,
+    );
+  }
   return ride.groupMsgId ?? ride.adminMsgId ?? null;
 }
 
@@ -191,18 +264,26 @@ async function alertAdmin(ride: Ride, html: string) {
  * trouvé » ou est annulée côté Rydar Drive (avis en direct seulement). Les erreurs Telegram ne remontent jamais ;
  * les erreurs de stockage, si (l'avis sera renvoyé par Rydar Drive).
  */
-export async function applyDriveRide(ref: string, remote: DriveRide, opts: { event?: string; notify?: boolean } = {}): Promise<DriveApplyResult> {
-  const seen = { linked: true };
+export async function applyDriveRide(
+  ref: string,
+  remote: DriveRide,
+  opts: { event?: string; notify?: boolean; refreshUnchanged?: boolean } = {},
+): Promise<DriveApplyResult> {
+  const seen: { linked: boolean; current?: Ride } = { linked: true };
   const res = await updateRide(ref, (r) => {
     if (!r.drive || r.drive.id !== remote.id) {
       seen.linked = false;
       return null;
     }
+    seen.current = r;
     return mergeDriveRide(r, remote);
   });
   if (!res.ok) {
-    if (res.reason === "rejected") return seen.linked ? { ok: true, changed: false } : { ok: false, reason: "not_linked" };
-    return { ok: false, reason: res.reason };
+    if (res.reason !== "rejected") return { ok: false, reason: res.reason };
+    if (!seen.linked) return { ok: false, reason: "not_linked" };
+    // Avis renvoyé après une coupure (course déjà enregistrée, fiche peut-être pas) : la fiche est remise à jour.
+    if (opts.refreshUnchanged && seen.current) await refresh(seen.current).catch((err) => console.error("[rydar] fiche admin", err));
+    return { ok: true, changed: false };
   }
   try {
     await refresh(res.ride);

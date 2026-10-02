@@ -41,6 +41,8 @@ export interface DriveRide {
   pickup_at?: string | null;
   /** Présent dans les avis (webhooks) : sert à écarter un instantané plus ancien que celui déjà appliqué. */
   updated_at?: string | null;
+  /** created_at : date de création de la course dans Rydar Drive (avis arrivé avant l'enregistrement local). */
+  timestamps?: { created_at?: string | null } | null;
 }
 
 export class DriveError extends Error {
@@ -156,9 +158,27 @@ async function call<T>(path: string, init: { method?: string; body?: unknown; id
   return (json?.data ?? json) as T;
 }
 
-/** Envoie la réservation. Idempotent : un renvoi avec la même référence ne crée pas de doublon. */
-export function pushToDrive(b: Booking) {
-  return call<DriveRide>("/rides", { method: "POST", body: drivePayload(b), idempotencyKey: `rydar-prive-${b.ref}` });
+/**
+ * Clé d'idempotence de POST /rides : unique par réservation (référence + instant de création), car Rydar Drive la
+ * garde pour toujours alors qu'une référence RP-… finit par être tirée de nouveau. Stable pour une même réservation :
+ * un renvoi de cette réservation ne crée pas de doublon.
+ */
+export function driveIdempotencyKey(b: Booking) {
+  const created = Date.parse(b.createdAt);
+  return `rydar-prive-${b.ref}-${Number.isFinite(created) ? created.toString(36) : "0"}`;
+}
+
+/**
+ * Envoie la réservation. Idempotent (voir driveIdempotencyKey). Une course renvoyée par Rydar Drive au titre de
+ * l'idempotence mais portant une autre référence est refusée : la réservation part alors dans le groupe Telegram.
+ */
+export async function pushToDrive(b: Booking) {
+  const json = await request("/rides", { method: "POST", body: drivePayload(b), idempotencyKey: driveIdempotencyKey(b) });
+  const ride = (json?.data ?? json) as DriveRide | null;
+  if (!ride || typeof ride.id !== "string") throw new DriveError("Réponse inattendue de Rydar Drive", 0, "BAD_RESPONSE");
+  if (json?.idempotent_replay === true && ride.external_reference !== b.ref)
+    throw new DriveError(`Rydar Drive a renvoyé une autre course (${ride.external_reference ?? "sans référence"})`, 409, "IDEMPOTENT_REPLAY");
+  return ride;
 }
 
 export function getDriveRide(id: string) {

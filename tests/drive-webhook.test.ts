@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Ride } from "@/lib/rides";
 import type { Booking } from "@/lib/types";
 
@@ -8,6 +8,8 @@ const h = vi.hoisted(() => ({
   db: new Map<string, string>(),
   failStore: false,
   failTelegram: false,
+  /** Appelé pendant l'envoi de la fiche admin (avis arrivé au même moment). */
+  slowAdmin: null as null | (() => Promise<void>),
   calls: [] as { method: string; payload: Record<string, unknown> }[],
 }));
 
@@ -17,7 +19,13 @@ vi.mock("@/lib/rides", () => ({
     const raw = h.db.get(ref);
     return raw ? { ride: JSON.parse(raw), version: raw } : null;
   },
-  saveRide: async () => true,
+  saveRide: async (ride: Ride, version: string | null) => {
+    if (h.failStore) throw new Error("stockage indisponible");
+    const cur = h.db.get(ride.booking.ref) ?? null;
+    if (cur !== version) return false;
+    h.db.set(ride.booking.ref, JSON.stringify(ride));
+    return true;
+  },
   recentRides: async () => [],
   updateRide: async (ref: string, mutate: (r: Ride) => Ride | null) => {
     if (h.failStore) throw new Error("stockage indisponible");
@@ -34,6 +42,11 @@ vi.mock("@/lib/telegram/api", () => {
   class TelegramError extends Error {}
   const send = async (method: string, payload: Record<string, unknown>) => {
     h.calls.push({ method, payload });
+    if (method === "sendMessage" && h.slowAdmin) {
+      const during = h.slowAdmin;
+      h.slowAdmin = null;
+      await during();
+    }
     if (h.failTelegram) throw new TelegramError("Telegram en panne");
     return { message_id: 99, username: "rydar_bot" };
   };
@@ -46,6 +59,7 @@ vi.mock("@/lib/telegram/api", () => {
 });
 
 const { POST } = await import("@/app/api/drive/webhook/route");
+const { postBookingToCentral } = await import("@/lib/telegram/central");
 const { kv } = await import("@/lib/store");
 
 const APP_SECRET = "secret-applicatif-de-test";
@@ -140,6 +154,10 @@ beforeEach(() => {
   h.calls.length = 0;
   h.failStore = false;
   h.failTelegram = false;
+  h.slowAdmin = null;
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("POST /api/drive/webhook", () => {
@@ -260,5 +278,111 @@ describe("POST /api/drive/webhook", () => {
     const res = await POST(request(late));
     expect(await res.json()).toEqual({ ok: true, updated: false });
     expect(stored().drive?.status).toBe("DRIVER_ARRIVED");
+  });
+});
+
+describe("avis arrivé avant l'enregistrement de la course (réservation en cours)", () => {
+  const young = () => ({ timestamps: { created_at: new Date(Date.now() - 2000).toISOString() } });
+
+  it("409 à réessayer, avis gardé de côté puis appliqué à l'enregistrement", async () => {
+    const ev = event("ride.accepted", young());
+    const res = await POST(request(ev));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("not_ready");
+    // L'anti-doublon est libéré : le renvoi de Rydar Drive sera traité.
+    expect(await kv().get(`drivewh:${ev.id}`)).toBeNull();
+    const held = JSON.parse((await kv().get("drivewh:early:RP-ABCDE"))!);
+    expect(held.status).toBe("ACCEPTED");
+    expect(held.customer).toBeUndefined();
+
+    // La réservation se termine : course enregistrée AVANT la fiche admin, avis gardé appliqué tout de suite.
+    await postBookingToCentral(booking, { drive: { id: "drv-1", number: 1928, status: "SEARCHING_DRIVER", external_reference: "RP-ABCDE" } });
+    expect(stored().status).toBe("taken");
+    expect(stored().drive?.driver).toBe("Karim · Mercedes Classe E noire · AB-123-CD");
+    expect(stored().adminMsgId).toBe(99);
+    const card = h.calls.find((c) => c.method === "sendMessage");
+    expect(card?.payload.text).toContain("Chauffeur attribué");
+    expect(await kv().get("drivewh:early:RP-ABCDE")).toBeNull();
+
+    // Renvoi de Rydar Drive une minute plus tard : traité normalement (déjà à jour).
+    const retry = await POST(request(ev));
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ ok: true, updated: false });
+  });
+
+  it("un avis gardé pour une autre course Rydar Drive (même référence) n'est jamais appliqué", async () => {
+    await POST(request(event("ride.completed", { id: "drv-etrangere", status: "COMPLETED", ...young() })));
+    await postBookingToCentral(booking, { drive: { id: "drv-1", number: 1928, status: "SEARCHING_DRIVER", external_reference: "RP-ABCDE" } });
+    expect(stored().status).toBe("open");
+    expect(stored().drive?.status).toBe("SEARCHING_DRIVER");
+  });
+
+  it("un avis gardé plus ancien ne remplace pas le plus récent", async () => {
+    await POST(request(event("ride.driver_arrived", { status: "DRIVER_ARRIVED", ...young(), updated_at: "2026-10-02T10:30:00Z" })));
+    await POST(request(event("ride.accepted", { status: "ACCEPTED", ...young(), updated_at: "2026-10-02T10:00:00Z" })));
+    expect(JSON.parse((await kv().get("drivewh:early:RP-ABCDE"))!).status).toBe("DRIVER_ARRIVED");
+  });
+
+  it("course créée il y a longtemps et inconnue ici : ignorée (200), pas de renvoi", async () => {
+    const res = await POST(request(event("ride.accepted", { timestamps: { created_at: "2026-01-01T00:00:00Z" } })));
+    expect(await res.json()).toEqual({ ok: true, ignored: true });
+    expect(await kv().get("drivewh:early:RP-ABCDE")).toBeNull();
+  });
+
+  it("un avis appliqué pendant l'envoi de la fiche admin la remet à jour", async () => {
+    h.slowAdmin = async () => {
+      await POST(request(event("ride.accepted")));
+    };
+    await postBookingToCentral(booking, { drive: { id: "drv-1", number: 1928, status: "SEARCHING_DRIVER", external_reference: "RP-ABCDE" } });
+    expect(stored().status).toBe("taken");
+    expect(stored().adminMsgId).toBe(99);
+    const edits = h.calls.filter((c) => c.method === "editMessageText" && c.payload.message_id === 99);
+    expect(edits.at(-1)?.payload.text).toContain("Chauffeur attribué");
+  });
+});
+
+describe("anti-doublon : un traitement interrompu n'est pas perdu", () => {
+  it("traitement en cours (ou interrompu) : 409, puis repris après le bail", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    seed();
+    const ev = event("ride.completed", { status: "COMPLETED" });
+    // Invocation tuée après la prise du verrou (délai dépassé, instance arrêtée) : il reste « en cours ».
+    await kv().setNX(`drivewh:${ev.id}`, "processing", 45);
+    const during = await POST(request(ev));
+    expect(during.status).toBe(409);
+    expect((await during.json()).error).toBe("in_progress");
+    expect(stored().status).toBe("open");
+
+    // Renvoi de Rydar Drive 60 s plus tard : le bail a expiré, l'avis est appliqué.
+    vi.setSystemTime(Date.now() + 60_000);
+    const retry = await POST(request(ev));
+    expect(await retry.json()).toEqual({ ok: true, updated: true });
+    expect(stored().status).toBe("done");
+    expect(await kv().get(`drivewh:${ev.id}`)).toBe("done");
+    // Puis « traité » : un nouveau renvoi est acquitté sans être rejoué.
+    expect(await (await POST(request(ev))).json()).toEqual({ ok: true, duplicate: true });
+  });
+
+  it("renvoi après une coupure entre l'enregistrement et la fiche : fiche remise à jour", async () => {
+    seed();
+    const ev = event("ride.accepted");
+    // Première invocation : course enregistrée, puis coupure avant la fiche et avant « traité ».
+    const rides = await import("@/lib/rides");
+    await rides.updateRide("RP-ABCDE", (r) => {
+      r.status = "taken";
+      r.drive = { ...r.drive!, status: "ACCEPTED", driver: "Karim · Mercedes Classe E noire · AB-123-CD", updatedAt: ev.data!.ride!.updated_at as string };
+      return r;
+    });
+    h.calls.length = 0;
+    const res = await POST(request(ev));
+    expect(await res.json()).toEqual({ ok: true, updated: false });
+    const edit = h.calls.find((c) => c.method === "editMessageText" && c.payload.message_id === 7);
+    expect(edit?.payload.text).toContain("Chauffeur attribué");
+  });
+
+  it("ping : marqué traité seulement une fois la réponse prête", async () => {
+    const ev = event("ping");
+    expect((await POST(request(ev))).status).toBe(200);
+    expect(await kv().get(`drivewh:${ev.id}`)).toBe("done");
   });
 });

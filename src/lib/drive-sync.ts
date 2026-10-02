@@ -107,6 +107,40 @@ export function mergeDriveRide(ride: Ride, remote: DriveRide): Ride | null {
   return changed ? r : null;
 }
 
+/**
+ * Avis arrivé avant l'enregistrement de la course (réservation en cours) : Rydar Drive peut prévenir dès la création
+ * de la course, avant que RYDAR Privé ait reçu sa réponse et enregistré la course. Pendant cette fenêtre, l'avis est
+ * gardé de côté et refusé avec un statut à réessayer ; au-delà, une référence inconnue est ignorée.
+ */
+export const EARLY_DRIVE_WINDOW_MS = 15 * 60 * 1000;
+
+/** Course Rydar Drive créée il y a moins de EARLY_DRIVE_WINDOW_MS (date de création absente : non). */
+export function isRecentDriveRide(remote: DriveRide, now = Date.now()) {
+  const created = instant(remote.timestamps?.created_at);
+  return created !== null && Math.abs(now - created) <= EARLY_DRIVE_WINDOW_MS;
+}
+
+/** Instantané réduit aux champs utiles (gardé de côté quelques minutes : aucune donnée client). */
+export function trimDriveRide(remote: DriveRide): DriveRide {
+  return {
+    id: remote.id,
+    number: remote.number,
+    status: remote.status,
+    driver: remote.driver ?? null,
+    external_reference: remote.external_reference ?? null,
+    pickup_at: remote.pickup_at ?? null,
+    updated_at: remote.updated_at ?? null,
+  };
+}
+
+/** true si `next` remplace `prev` : autre course, ou instantané au moins aussi récent. */
+export function isNewerDriveRide(prev: DriveRide, next: DriveRide) {
+  if (prev.id !== next.id) return true;
+  const a = instant(prev.updated_at);
+  const b = instant(next.updated_at);
+  return a === null || b === null || b >= a;
+}
+
 export type DriveAlert = "no_driver" | "cancelled";
 
 /**

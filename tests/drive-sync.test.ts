@@ -1,9 +1,9 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { DRIVE_FINAL, driveWebhookSecret, verifyDriveSignature, type DriveRide } from "@/lib/drive";
-import { driveAlertKind, localStatusOf, mergeDriveRide } from "@/lib/drive-sync";
+import { driveAlertKind, isNewerDriveRide, isRecentDriveRide, localStatusOf, mergeDriveRide, trimDriveRide } from "@/lib/drive-sync";
 import type { Ride } from "@/lib/rides";
-import { adminKeyboard, driveAlertText } from "@/lib/telegram/format";
+import { adminKeyboard, adminText, driveAlertText, pickupOf } from "@/lib/telegram/format";
 import type { Booking } from "@/lib/types";
 
 const booking: Booking = {
@@ -217,5 +217,55 @@ describe("alertes admin", () => {
     expect(DRIVE_FINAL.has("NO_DRIVER_FOUND")).toBe(false);
     const buttons = adminKeyboard(ride({ status: "NO_DRIVER_FOUND" })).inline_keyboard.flat();
     expect(buttons.some((b) => b.callback_data === "rp:cancel:RP-ABCDE")).toBe(true);
+  });
+});
+
+describe("avis arrivé avant l'enregistrement de la course", () => {
+  const now = Date.parse("2026-10-02T10:00:00Z");
+
+  it("course récente seulement (date de création Rydar Drive)", () => {
+    expect(isRecentDriveRide(snap({ timestamps: { created_at: "2026-10-02T09:59:58Z" } }), now)).toBe(true);
+    expect(isRecentDriveRide(snap({ timestamps: { created_at: "2026-10-02T09:44:00Z" } }), now)).toBe(false);
+    expect(isRecentDriveRide(snap({ timestamps: null }), now)).toBe(false);
+    expect(isRecentDriveRide(snap(), now)).toBe(false);
+  });
+
+  it("garde le plus récent et aucune donnée client", () => {
+    const old = snap({ status: "OFFERED", updated_at: "2026-10-02T10:00:00Z" });
+    const recent = snap({ updated_at: "2026-10-02T10:00:05Z" });
+    expect(isNewerDriveRide(old, recent)).toBe(true);
+    expect(isNewerDriveRide(recent, old)).toBe(false);
+    expect(isNewerDriveRide(recent, snap({ id: "drv-autre", updated_at: "2026-10-02T09:00:00Z" }))).toBe(true);
+    const kept = trimDriveRide({ ...recent, customer: { name: "Jean Dupont" } } as unknown as DriveRide);
+    expect(Object.keys(kept).sort()).toEqual(["driver", "external_reference", "id", "number", "pickup_at", "status", "updated_at"]);
+  });
+});
+
+describe("course déplacée dans Rydar Drive", () => {
+  it("la fiche admin affiche la nouvelle heure, l'ancienne barrée", () => {
+    // Réservée le samedi 10/10 à 09:30 (Paris) ; Rydar Drive déplace la prise en charge à 11:00 (Paris).
+    const before = ride({ pickupAt: "2026-10-10T07:30:00Z" });
+    expect(pickupOf(before)).toEqual({ date: "2026-10-10", time: "09:30", moved: false });
+    expect(adminText(before)).toContain("📅 Samedi 10 octobre 2026 · <b>09:30</b>\n");
+
+    const moved = mergeDriveRide(
+      before,
+      snap({ status: "SEARCHING_DRIVER", driver: null, pickup_at: "2026-10-10T09:00:00Z", updated_at: "2026-10-02T11:00:00Z" }),
+    )!;
+    expect(pickupOf(moved)).toEqual({ date: "2026-10-10", time: "11:00", moved: true });
+    const t = adminText(moved);
+    expect(t).toContain("📅 Samedi 10 octobre 2026 · <b>11:00</b> (déplacée, initialement <s>09:30</s>)");
+    expect(t).not.toContain("<b>09:30</b>");
+    expect(driveAlertText(moved, "no_driver")).toContain("· 11:00 ·");
+  });
+
+  it("autre jour : l'ancienne date est rappelée", () => {
+    const moved = ride({ pickupAt: "2026-10-11T06:00:00Z" });
+    expect(adminText(moved)).toContain("📅 Dimanche 11 octobre 2026 · <b>08:00</b> (déplacée, initialement <s>10/10 09:30</s>)");
+  });
+
+  it("même instant écrit autrement : rien de déplacé", () => {
+    expect(pickupOf(ride({ pickupAt: "2026-10-10T09:30:00+02:00" })).moved).toBe(false);
+    expect(pickupOf(ride({ pickupAt: "pas une date" })).moved).toBe(false);
   });
 });

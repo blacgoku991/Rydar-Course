@@ -6,18 +6,39 @@ import { env } from "@/lib/env";
 import { normalizePhone } from "@/lib/phone";
 import { cleanText } from "@/lib/quote-service";
 import type { QuotePayload } from "@/lib/quote-token";
-import { kv } from "@/lib/store";
+import { loadRide } from "@/lib/rides";
+import { kv, type KV } from "@/lib/store";
 import { telegramConfigured } from "@/lib/telegram/api";
 import { postBookingToCentral } from "@/lib/telegram/central";
 import type { Booking, BookingSource, Locale } from "@/lib/types";
 
 const REF_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const BOOKING_TTL = 60 * 60 * 24 * 90;
+/** Réservation d'une référence : plus longue que la conservation des courses en clé/valeur (120 jours). */
+const REF_TTL = 60 * 60 * 24 * 400;
 
 export function newRef() {
   let s = "";
   for (let i = 0; i < 5; i++) s += REF_ALPHABET[randomInt(REF_ALPHABET.length)];
   return `RP-${s}`;
+}
+
+/**
+ * Tire une référence libre : réservée dans le stockage clé/valeur et portée par aucune course enregistrée
+ * (Vercel Blob garde les courses sans limite de durée ; la mémoire est remise à zéro à chaque déploiement).
+ * Stockage indisponible : la référence est acceptée (la clé d'idempotence Rydar Drive reste unique, voir drive.ts).
+ */
+async function reserveRef(store: KV) {
+  let ref = newRef();
+  for (let i = 0; i < 8; i++, ref = newRef()) {
+    if (!(await store.setNX(`ref:${ref}`, "1", REF_TTL).catch(() => true))) continue;
+    const used = await loadRide(ref).then(
+      (r) => !!r,
+      () => false,
+    );
+    if (!used) return ref;
+  }
+  return ref;
 }
 
 export type BookingError =
@@ -101,8 +122,7 @@ export async function createBooking(args: {
     return { ok: false, error: "dispatch_failed" };
   }
 
-  let ref = newRef();
-  for (let i = 0; i < 5 && !(await store.setNX(`ref:${ref}`, "1", BOOKING_TTL).catch(() => true)); i++) ref = newRef();
+  const ref = await reserveRef(store);
 
   const p = args.payload;
   const booking: Booking = {

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { drivePayload } from "@/lib/drive";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { driveIdempotencyKey, drivePayload, pushToDrive } from "@/lib/drive";
 import { adminKeyboard, adminText } from "@/lib/telegram/format";
 import type { Ride } from "@/lib/rides";
 import type { Booking } from "@/lib/types";
@@ -91,5 +91,46 @@ describe("fiche admin Rydar Drive", () => {
     expect(buttons.some((b) => b.callback_data?.startsWith("rp:reopen"))).toBe(false);
     const done = adminKeyboard({ ...ride, drive: { ...ride.drive!, status: "COMPLETED" } }).inline_keyboard.flat();
     expect(done.some((b) => b.callback_data?.startsWith("rp:cancel"))).toBe(false);
+  });
+});
+
+describe("Rydar Drive : clé d'idempotence de POST /rides", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.RYDAR_DRIVE_URL;
+    delete process.env.RYDAR_DRIVE_API_KEY;
+  });
+
+  it("unique par réservation, stable pour la même réservation", () => {
+    const key = driveIdempotencyKey(booking);
+    expect(key).toMatch(/^rydar-prive-RP-ABCDE-[0-9a-z]+$/);
+    expect(driveIdempotencyKey({ ...booking })).toBe(key);
+    // Même référence tirée de nouveau plus tard : autre clé (Rydar Drive garde les clés pour toujours).
+    expect(driveIdempotencyKey({ ...booking, createdAt: "2029-03-01T12:00:00Z" })).not.toBe(key);
+    expect(key.length).toBeLessThanOrEqual(100);
+  });
+
+  function stubDrive(body: unknown) {
+    process.env.RYDAR_DRIVE_URL = "https://drive.test";
+    process.env.RYDAR_DRIVE_API_KEY = "rk_test";
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => Response.json(body, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("envoie la clé unique et accepte la course créée", async () => {
+    const fetchMock = stubDrive({ data: { id: "drv-1", number: 12, status: "SEARCHING_DRIVER", external_reference: "RP-ABCDE" } });
+    const ride = await pushToDrive(booking);
+    expect(ride.id).toBe("drv-1");
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBe(driveIdempotencyKey(booking));
+  });
+
+  it("refuse une ancienne course renvoyée pour une autre référence", async () => {
+    stubDrive({ data: { id: "drv-ancienne", status: "COMPLETED", external_reference: "RP-ZZZZZ" }, idempotent_replay: true });
+    await expect(pushToDrive(booking)).rejects.toMatchObject({ code: "IDEMPOTENT_REPLAY" });
+    // Renvoi de la même réservation : la course déjà créée est reprise.
+    stubDrive({ data: { id: "drv-1", status: "OFFERED", external_reference: "RP-ABCDE" }, idempotent_replay: true });
+    await expect(pushToDrive(booking)).resolves.toMatchObject({ id: "drv-1" });
   });
 });
