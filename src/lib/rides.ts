@@ -25,6 +25,8 @@ export interface Ride {
   adminMsgId?: number;
   driverMsgId?: number;
   test?: boolean;
+  /** Course envoyée à Rydar Drive (dispatch) : id, numéro, dernier statut connu, chauffeur. */
+  drive?: { id: string; number?: number; status: string; driver?: string };
   log: { at: string; text: string }[];
 }
 

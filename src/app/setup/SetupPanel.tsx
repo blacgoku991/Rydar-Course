@@ -23,6 +23,7 @@ type Status = {
   elevenlabs: { apiKey: boolean; agentId: string | null; voiceId: string | null; languages: string[]; webhookSecret: boolean };
   twilio: { configured: boolean; number: string | null };
   humanTransfer: boolean;
+  drive: { configured: boolean; url: string | null };
 };
 
 type Log = { ok: boolean; text: string; extra?: string };
@@ -131,6 +132,23 @@ export default function SetupPanel() {
               </button>
               <button className="btn btn-ghost" disabled={!status.telegram.chatId || busy !== null} onClick={() => call("test_booking")}>
                 {busy === "test_booking" ? "…" : "Envoyer une course test"}
+              </button>
+            </div>
+          </section>
+
+          <section className={styles.card}>
+            <h2>Rydar Drive (dispatch)</h2>
+            <ul className={styles.list}>
+              <Item ok={!!status.drive.url} label="RYDAR_DRIVE_URL" detail={status.drive.url ?? "ex. https://app.rydar.app"} />
+              <Item
+                ok={status.drive.configured}
+                label="RYDAR_DRIVE_API_KEY"
+                detail={status.drive.configured ? "les courses partent dans Rydar Drive" : "sans clé : les courses vont dans le groupe Telegram"}
+              />
+            </ul>
+            <div className={styles.actions}>
+              <button className="btn btn-primary" disabled={!status.drive.configured || busy !== null} onClick={() => call("drive")}>
+                {busy === "drive" ? "…" : "Tester Rydar Drive"}
               </button>
             </div>
           </section>

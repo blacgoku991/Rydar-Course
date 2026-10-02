@@ -1,5 +1,6 @@
 import { BUSINESS } from "@/config/business";
 import type { VehicleId } from "@/config/pricing";
+import { DRIVE_FINAL, DRIVE_STATUS_FR, driveDashboardUrl } from "@/lib/drive";
 import { getKnownPlace } from "@/lib/known-places";
 import { formatPhoneIntl } from "@/lib/phone";
 import { commissionSplit } from "@/lib/pricing";
@@ -203,8 +204,12 @@ const ADMIN_STATUS: Record<Ride["status"], string> = {
 export function adminText(ride: Ride): string {
   const b = ride.booking;
   const source = b.source === "phone" ? "📞 Téléphone IA" : b.source === "voice" ? "🎙️ Assistant vocal (site)" : "🌐 Site";
+  const d = ride.drive;
+  const head = d
+    ? `🚀 <b>Rydar Drive</b>${d.number ? ` n° ${d.number}` : ""} · ${escapeHtml(DRIVE_STATUS_FR[d.status] ?? d.status)}${d.driver ? `\n👤 ${escapeHtml(d.driver)}` : ""}`
+    : `${ADMIN_STATUS[ride.status]}${ride.driver && ride.status !== "open" ? ` · ${escapeHtml(ride.driver.name)}${ride.driver.username ? ` (@${escapeHtml(ride.driver.username)})` : ""}` : ""}`;
   const lines = [
-    `${ADMIN_STATUS[ride.status]}${ride.driver && ride.status !== "open" ? ` · ${escapeHtml(ride.driver.name)}${ride.driver.username ? ` (@${escapeHtml(ride.driver.username)})` : ""}` : ""}`,
+    head,
     `<code>${b.ref}</code> · ${source} (${b.locale.toUpperCase()})${ride.test ? " · 🧪 TEST" : ""}`,
     "",
     `📅 ${escapeHtml(capitalized(formatDateLong(b.date, "fr")))} · <b>${b.time}</b>`,
@@ -247,6 +252,13 @@ export function adminKeyboard(ride: Ride, confirmCancel = false) {
     };
   }
   const rows: TgInlineButton[][] = [[{ text: "💬 WhatsApp client", url: whatsappUrl(ride.booking.customer.phone) }]];
+  const d = ride.drive;
+  if (d) {
+    const url = driveDashboardUrl(d.id);
+    rows.push([{ text: "🔄 Actualiser", callback_data: `rp:drv:${ref}` }, ...(url ? [{ text: "🚀 Ouvrir Rydar Drive", url }] : [])]);
+    if (!DRIVE_FINAL.has(d.status) && ride.status !== "cancelled") rows.push([{ text: "❌ Annuler", callback_data: `rp:cancel:${ref}` }]);
+    return { inline_keyboard: rows };
+  }
   if (ride.status === "open") rows.push([{ text: "❌ Annuler", callback_data: `rp:cancel:${ref}` }]);
   if (ride.status === "taken")
     rows.push([

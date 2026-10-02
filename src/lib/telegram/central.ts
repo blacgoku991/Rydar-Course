@@ -1,4 +1,5 @@
 import "server-only";
+import { cancelDriveRide, DRIVE_FINAL, DRIVE_STATUS_FR, DriveError, driveDriverLabel, getDriveRide, type DriveRide } from "@/lib/drive";
 import { env } from "@/lib/env";
 import { logLine, loadRide, recentRides, saveRide, updateRide, type Ride, type RideDriver } from "@/lib/rides";
 import { sendToCentral, tg, TelegramError } from "@/lib/telegram/api";
@@ -12,6 +13,8 @@ import type { Booking } from "@/lib/types";
  *  - groupe chauffeurs : fiche courte + « ✋ JE PRENDS » (aucune donnée client) ;
  *  - le chauffeur qui prend reçoit les coordonnées en privé (le bot s'ouvre tout seul la 1re fois) ;
  *  - l'admin (TELEGRAM_ADMIN_CHAT_ID) suit tout : prix client, commission, historique, annulation.
+ * Avec Rydar Drive : la course est dispatchée par Rydar Drive, pas de fiche dans le groupe ;
+ * l'admin garde sa fiche, avec le statut Rydar Drive (bouton « Actualiser »).
  */
 
 const HTML = { parse_mode: "HTML", link_preview_options: { is_disabled: true } } as const;
@@ -59,15 +62,21 @@ async function refresh(ride: Ride, opts: { driver?: boolean; previousDriver?: Ri
 /* Publication                                                         */
 /* ------------------------------------------------------------------ */
 
-export async function postBookingToCentral(b: Booking, opts: { test?: boolean } = {}) {
+export async function postBookingToCentral(b: Booking, opts: { test?: boolean; drive?: DriveRide; driveError?: string } = {}) {
   const ride: Ride = {
     booking: b,
     status: "open",
     test: opts.test,
     log: [logLine(`Reçue (${b.source === "phone" ? "téléphone" : b.source === "voice" ? "assistant vocal" : "site"})`, new Date(b.createdAt))],
   };
-  const group = await sendToCentral<TgMessage>({ text: groupText(ride), reply_markup: groupKeyboard(ride), ...HTML });
-  ride.groupMsgId = group.message_id;
+  if (opts.drive) {
+    ride.drive = { id: opts.drive.id, number: opts.drive.number, status: opts.drive.status };
+    ride.log.push(logLine(`🚀 Envoyée à Rydar Drive${opts.drive.number ? ` (n° ${opts.drive.number})` : ""}`));
+  } else {
+    if (opts.driveError) ride.log.push(logLine(`⚠️ Rydar Drive a refusé (${opts.driveError.slice(0, 160)}) : envoyée au groupe`));
+    const group = await sendToCentral<TgMessage>({ text: groupText(ride), reply_markup: groupKeyboard(ride), ...HTML });
+    ride.groupMsgId = group.message_id;
+  }
   try {
     const admin = await sendAdmin(adminText(ride), { reply_markup: adminKeyboard(ride) });
     if (admin) ride.adminMsgId = admin.message_id;
@@ -75,7 +84,7 @@ export async function postBookingToCentral(b: Booking, opts: { test?: boolean } 
     console.error("[rydar] fiche admin", err);
   }
   await saveRide(ride, null);
-  return group.message_id;
+  return ride.groupMsgId ?? ride.adminMsgId ?? null;
 }
 
 /** Message libre pour l'admin (récapitulatif d'appel…). Sans admin configuré : dans le groupe. */
@@ -147,15 +156,55 @@ async function driverAction(ref: string, user: TgUser, action: "done" | "rel"): 
   return { ok: true, message: action === "done" ? "🏁 Merci, course terminée !" : "Course remise en ligne pour les autres chauffeurs." };
 }
 
+/** Relit le statut de la course dans Rydar Drive et met à jour la fiche admin. */
+async function refreshDrive(ref: string): Promise<Result> {
+  const cur = await loadRide(ref);
+  if (!cur?.ride.drive) return { ok: false, message: "Course non liée à Rydar Drive." };
+  let remote: DriveRide;
+  try {
+    remote = await getDriveRide(cur.ride.drive.id);
+  } catch (err) {
+    return { ok: false, message: `Rydar Drive : ${err instanceof DriveError ? err.message : "injoignable"}` };
+  }
+  const res = await updateRide(ref, (r) => {
+    if (!r.drive) return null;
+    const driver = driveDriverLabel(remote);
+    if (r.drive.status === remote.status && r.drive.driver === driver) return null;
+    if (r.drive.status !== remote.status) r.log.push(logLine(`Rydar Drive : ${DRIVE_STATUS_FR[remote.status] ?? remote.status}`));
+    if (driver && driver !== r.drive.driver) r.log.push(logLine(`👤 ${driver}`));
+    r.drive = { ...r.drive, status: remote.status, driver };
+    if (remote.status === "COMPLETED") r.status = "done";
+    else if (remote.status === "CANCELLED") r.status = "cancelled";
+    else if (driver) r.status = "taken";
+    return r;
+  });
+  if (res.ok) await refresh(res.ride);
+  return { ok: true, message: DRIVE_STATUS_FR[remote.status] ?? remote.status };
+}
+
 async function adminAction(ref: string, user: TgUser, action: "cancel_yes" | "reopen"): Promise<Result> {
   const who = nameOf(user);
+  // Course Rydar Drive : l'annulation passe d'abord par Rydar Drive.
+  if (action === "cancel_yes") {
+    const cur = await loadRide(ref);
+    const d = cur?.ride.drive;
+    if (d && !DRIVE_FINAL.has(d.status)) {
+      try {
+        await cancelDriveRide(d.id, `Annulée par la centrale RYDAR Privé (${who})`);
+      } catch (err) {
+        const msg = err instanceof DriveError ? err.message : "injoignable";
+        return { ok: false, message: `Annulation refusée par Rydar Drive (${msg}). Annulez-la dans le dashboard Rydar Drive.` };
+      }
+    }
+  }
   const res = await updateRide(ref, (r) => {
     if (action === "cancel_yes") {
       if (r.status !== "open" && r.status !== "taken") return null;
       r.status = "cancelled";
+      if (r.drive) r.drive.status = "CANCELLED";
       r.log.push(logLine(`❌ Annulée par ${who}`));
     } else {
-      if (r.status !== "taken" && r.status !== "cancelled") return null;
+      if (r.drive || (r.status !== "taken" && r.status !== "cancelled")) return null;
       r.status = "open";
       r.log.push(logLine(`♻️ Remise en ligne par ${who}`));
       r.driver = undefined;
@@ -224,6 +273,10 @@ async function handleCallback(cq: TgCallbackQuery) {
     const r = await adminAction(ref, cq.from, action);
     return answer(cq, r.message, { alert: !r.ok });
   }
+  if (action === "drv") {
+    const r = await refreshDrive(ref);
+    return answer(cq, r.message, { alert: !r.ok });
+  }
   return answer(cq, "Action inconnue.");
 }
 
@@ -250,7 +303,8 @@ async function listCourses(chatId: number) {
   const lines = rides.map((r) => {
     const b = r.booking;
     const dest = b.dropoff ? shortPlace(b.dropoff) : `MAD ${b.hours}H`;
-    return `${STATUS_ICON[r.status]} <code>${b.ref}</code> ${escapeHtml(shortDate(b.date))} ${b.time} · ${escapeHtml(shortPlace(b.pickup))} ➜ ${escapeHtml(dest)}${r.driver ? ` · ${escapeHtml(r.driver.name)}` : ""}`;
+    const icon = r.drive ? (DRIVE_STATUS_FR[r.drive.status]?.split(" ")[0] ?? "🚀") : STATUS_ICON[r.status];
+    return `${icon} <code>${b.ref}</code> ${escapeHtml(shortDate(b.date))} ${b.time} · ${escapeHtml(shortPlace(b.pickup))} ➜ ${escapeHtml(dest)}${r.driver ? ` · ${escapeHtml(r.driver.name)}` : r.drive?.driver ? ` · ${escapeHtml(r.drive.driver)}` : ""}`;
   });
   return reply(chatId, ["<b>Dernières courses</b>", "🟡 en attente · 🟢 attribuée · 🏁 terminée · ❌ annulée", "", ...lines].join("\n"));
 }

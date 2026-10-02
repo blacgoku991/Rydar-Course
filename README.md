@@ -94,6 +94,33 @@ Toutes les variables sont décrites dans [`.env.example`](.env.example).
 - Modèle : `ELEVENLABS_LLM`, par défaut un modèle rapide (au téléphone, la latence compte).
 - Les consignes de l'IA sont dans [`src/lib/agent/prompt.ts`](src/lib/agent/prompt.ts). Après modification, cliquez de nouveau sur **Créer / mettre à jour l'agent**.
 
+## 3 bis. Brancher Rydar Drive (dispatch des chauffeurs)
+
+Avec Rydar Drive, les réservations du site, du téléphone et de l'assistant vocal partent **dans Rydar Drive** : c'est lui qui les propose aux chauffeurs. Telegram ne garde que la **fiche admin** : prix, commission, statut Rydar Drive, boutons « 🔄 Actualiser », « 🚀 Ouvrir Rydar Drive » et « ❌ Annuler ».
+
+1. Dans Rydar Drive : _Dashboard → Intégrations → Clés API_. Créez une clé avec les permissions `rides:create`, `rides:read` et `rides:cancel`, **sans origine navigateur**.
+2. Dans Vercel, ajoutez :
+   - `RYDAR_DRIVE_URL`, par exemple `https://app.rydar.app` ;
+   - `RYDAR_DRIVE_API_KEY` (type _Sensitive_).
+3. Redéployez. Sur `/setup`, cliquez **Tester Rydar Drive**.
+
+**Ce qui est envoyé :** adresses et coordonnées, date et heure, client, passagers, bagages, catégorie (Berline → `business`, Van → `van`, Prestige → `first`), prix client, numéro de vol et référence RP-…. La référence sert aussi de clé anti-doublon.
+
+**Sécurités :**
+
+- Si Rydar Drive refuse ou ne répond pas, la course part dans le **groupe Telegram**, avec le bouton « JE PRENDS ». L'historique indique la raison.
+- Les courses test de `/setup` ne sont jamais envoyées à Rydar Drive.
+- Rydar Drive ne prévient pas encore RYDAR Privé quand le statut change. Pour voir le dernier statut, appuyez sur « 🔄 Actualiser » dans la fiche admin.
+
+## Lien publicité (Meta Ads, Google…)
+
+Pour qu'une publicité ouvre directement l'assistant vocal, ajoutez `?assistant=1` à l'adresse :
+
+- `https://votre-site/fr?assistant=1` (français)
+- `https://votre-site/en?assistant=1` (anglais)
+
+Les paramètres de suivi peuvent s'ajouter à la suite, par exemple `?assistant=1&utm_source=meta`. Le client arrive sur le site avec l'assistant ouvert et appuie sur « Démarrer ». Les navigateurs exigent ce geste avant d'utiliser le micro.
+
 ## 4. Recommandé : stockage Upstash (gratuit)
 
 Vercel → **Storage → Upstash for Redis → Create**, puis connectez-le au projet. Les variables sont ajoutées automatiquement.

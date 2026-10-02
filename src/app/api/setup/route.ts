@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { BUSINESS } from "@/config/business";
 import { agentLanguages, ElevenLabsError, setupPhoneNumber, setupVoiceAgent } from "@/lib/agent/elevenlabs";
+import { driveConfigured, pingDrive } from "@/lib/drive";
 import { env, hasSecretBase, siteUrl } from "@/lib/env";
 import { jsonError, readJson } from "@/lib/http";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
@@ -41,6 +42,7 @@ async function status() {
     },
     twilio: { configured: !!(env.twilioAccountSid && env.twilioAuthToken && env.twilioPhoneNumber), number: env.twilioPhoneNumber ?? null },
     humanTransfer: !!env.humanTransferNumber,
+    drive: { configured: driveConfigured(), url: process.env.RYDAR_DRIVE_URL?.trim() || null },
   };
   if (env.telegramToken) {
     try {
@@ -150,6 +152,16 @@ export async function POST(req: Request) {
           ok: true,
           message: `Agent ${r.created ? "créé" : "mis à jour"} : ${r.agentId}.`,
           agent: r,
+        });
+      }
+      case "drive": {
+        if (!driveConfigured()) throw new Error("RYDAR_DRIVE_URL et RYDAR_DRIVE_API_KEY sont requis");
+        const r = await pingDrive();
+        const scopes = r.scopes ?? [];
+        const missing = ["rides:create", "rides:read", "rides:cancel"].filter((s) => !scopes.includes(s));
+        return Response.json({
+          ok: true,
+          message: `Rydar Drive connecté. Permissions : ${scopes.join(", ") || "?"}.${missing.length ? ` Manquant (conseillé) : ${missing.join(", ")}.` : ""} Les nouvelles réservations y sont envoyées.`,
         });
       }
       case "phone": {

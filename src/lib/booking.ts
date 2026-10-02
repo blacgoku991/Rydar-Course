@@ -1,6 +1,7 @@
 import "server-only";
 import { randomInt } from "node:crypto";
 import { VEHICLE_IDS, type VehicleId } from "@/config/pricing";
+import { DriveError, driveConfigured, pushToDrive, type DriveRide } from "@/lib/drive";
 import { env } from "@/lib/env";
 import { normalizePhone } from "@/lib/phone";
 import { cleanText } from "@/lib/quote-service";
@@ -61,7 +62,8 @@ export function validateCustomer(input: CustomerInput, payload: QuotePayload) {
 }
 
 /**
- * Crée la réservation et la publie dans la centrale Telegram.
+ * Crée la réservation et la transmet : Rydar Drive en priorité (dispatch des chauffeurs),
+ * sinon le groupe Telegram. La fiche admin Telegram est envoyée dans les deux cas.
  * Idempotent : la même clé renvoie la même réservation (double clic, reprise d'appel…).
  */
 export async function createBooking(args: {
@@ -130,21 +132,41 @@ export async function createBooking(args: {
   };
 
   let delivered = false;
+  // 1. Rydar Drive (jamais pour une course test : elle partirait chez de vrais chauffeurs).
+  let drive: DriveRide | undefined;
+  let driveError: string | undefined;
+  if (driveConfigured() && !args.test) {
+    try {
+      drive = await pushToDrive(booking);
+      delivered = true;
+    } catch (err) {
+      driveError = err instanceof DriveError ? `${err.code} : ${err.message}` : String(err);
+      console.error("[rydar] envoi Rydar Drive impossible", ref, driveError);
+    }
+  }
+
+  // 2. Telegram : fiche admin (+ groupe chauffeurs si Rydar Drive n'a pas pris la course).
   if (telegramConfigured()) {
     try {
-      await postBookingToCentral(booking, { test: args.test });
+      await postBookingToCentral(booking, { test: args.test, drive, driveError });
       delivered = true;
     } catch (err) {
       console.error("[rydar] envoi Telegram impossible", err);
-      await store.del(`${idemKey}:lock`).catch(() => undefined);
-      return { ok: false, error: "dispatch_failed" };
+      if (!delivered) {
+        await store.del(`${idemKey}:lock`).catch(() => undefined);
+        return { ok: false, error: "dispatch_failed" };
+      }
     }
-  } else if (env.isProd) {
-    console.error("[rydar] Telegram non configuré : réservation refusée", booking.ref);
-    return { ok: false, error: "dispatch_unavailable" };
-  } else {
-    console.info("[rydar] (dev) Telegram non configuré — réservation simulée :\n", JSON.stringify(booking, null, 2));
+  } else if (driveError) {
+    await store.del(`${idemKey}:lock`).catch(() => undefined);
+    return { ok: false, error: "dispatch_failed" };
   }
+
+  if (!delivered && env.isProd) {
+    console.error("[rydar] ni Rydar Drive ni Telegram configuré : réservation refusée", booking.ref);
+    return { ok: false, error: "dispatch_unavailable" };
+  }
+  if (!delivered) console.info("[rydar] (dev) aucune centrale configurée — réservation simulée :\n", JSON.stringify(booking, null, 2));
 
   try {
     await store.set(`booking:${ref}`, JSON.stringify(booking), BOOKING_TTL);

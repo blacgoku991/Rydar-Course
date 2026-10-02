@@ -96,9 +96,12 @@ export default function VoiceAssistant({ locale, dict, privacyHref }: { locale: 
     setPhase((p) => (p === "error" ? "idle" : p === "idle" ? p : "ended"));
   }, [stop]);
 
-  // Ouverture depuis les autres boutons du site.
+  // Ouverture depuis les autres boutons du site, ou par lien direct (publicités) :
+  // …/fr?assistant=1 ou …/fr#assistant ouvre l'assistant dès l'arrivée sur la page.
   useEffect(() => {
     const onOpen = () => setOpen(true);
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("assistant") || url.hash === "#assistant") onOpen();
     window.addEventListener(VOICE_EVENT, onOpen);
     return () => window.removeEventListener(VOICE_EVENT, onOpen);
   }, []);

@@ -16,7 +16,7 @@ Site Next.js 16 (App Router, Turbopack) : réservation de chauffeurs FR/EN, assi
 
 ## Flux
 
-- Site : `/api/places` (lieux connus + Géoplateforme IGN + Photon) → `/api/quote` (devis signé) → `/api/booking` → `postBookingToCentral` (Telegram).
+- Site : `/api/places` (lieux connus + Géoplateforme IGN + Photon) → `/api/quote` (devis signé) → `/api/booking` → `createBooking`. Celui-ci envoie à Rydar Drive (`src/lib/drive.ts`, API v1 `POST /rides`) si `RYDAR_DRIVE_*` est configuré, sinon au groupe Telegram (`postBookingToCentral`). La fiche admin Telegram part dans tous les cas.
 - Téléphone : ElevenLabs appelle `/api/agent/quote` puis `/api/agent/booking` (en-tête `X-Agent-Secret`), récap via `/api/agent/post-call`.
 - Assistant vocal sur le site : `src/components/voice/VoiceAssistant.tsx` (SDK `@elevenlabs/client`, WebRTC). Le jeton vient de `/api/agent/session`. La variable dynamique `channel` vaut `web` (sinon `phone`) et donne la source `voice`.
 - Telegram : groupe = fiche courte + « ✋ JE PRENDS » ; détails client envoyés en privé au chauffeur ; fiche complète à `TELEGRAM_ADMIN_CHAT_ID`. Boutons `rp:<action>:<ref>` traités par `/api/telegram/webhook`. État des courses dans `src/lib/rides.ts` (Vercel Blob privé avec `ifMatch`, sinon KV).

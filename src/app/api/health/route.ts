@@ -1,5 +1,7 @@
+import { driveConfigured } from "@/lib/drive";
 import { telegramConfigured } from "@/lib/telegram/api";
 
 export function GET() {
-  return Response.json({ ok: true, booking: telegramConfigured() ? "telegram" : "not_configured" }, { headers: { "Cache-Control": "no-store" } });
+  const booking = driveConfigured() ? "rydar_drive" : telegramConfigured() ? "telegram" : "not_configured";
+  return Response.json({ ok: true, booking }, { headers: { "Cache-Control": "no-store" } });
 }
