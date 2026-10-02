@@ -24,7 +24,9 @@ export async function POST(req: Request) {
     const idem =
       typeof body.idempotencyKey === "string" && /^[\w-]{8,80}$/.test(body.idempotencyKey)
         ? body.idempotencyKey
-        : createHash("sha256").update(`${ip}:${String(body.token)}:${String(body.vehicle)}`).digest("hex");
+        : createHash("sha256")
+            .update(`${ip}:${String(body.token)}:${String(body.vehicle)}`)
+            .digest("hex");
     const result = await createBooking({
       payload: verified.payload,
       customer: {
