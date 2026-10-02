@@ -7,6 +7,7 @@ import Header from "@/components/layout/Header";
 import JsonLd from "@/components/layout/JsonLd";
 import MobileBar from "@/components/layout/MobileBar";
 import RevealObserver from "@/components/layout/RevealObserver";
+import VoiceAssistant from "@/components/voice/VoiceAssistant";
 import { getDictionary } from "@/i18n";
 import { HTML_LANG, isLocale, LOCALES, OG_LOCALE } from "@/i18n/config";
 import { pathFor } from "@/i18n/routes";
@@ -68,7 +69,14 @@ export default async function LocaleLayout({ children, params }: { children: Rea
         <Header locale={lang} nav={dict.nav} a11y={dict.a11y} phoneHref={BUSINESS.phoneHref} phoneDisplay={BUSINESS.phoneDisplay} />
         <main id="main">{children}</main>
         <Footer locale={lang} dict={dict} />
-        <MobileBar nav={dict.nav} homePath={pathFor("home", lang)} phoneHref={BUSINESS.phoneHref} phoneDisplay={BUSINESS.phoneDisplay} />
+        <MobileBar
+          nav={dict.nav}
+          assistantLabel={dict.assistant.short}
+          homePath={pathFor("home", lang)}
+          phoneHref={BUSINESS.phoneHref}
+          phoneDisplay={BUSINESS.phoneDisplay}
+        />
+        <VoiceAssistant locale={lang} dict={dict.assistant} privacyHref={pathFor("privacy", lang)} />
         <RevealObserver />
         <JsonLd data={org} />
       </body>

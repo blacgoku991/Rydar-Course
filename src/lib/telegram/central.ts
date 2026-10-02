@@ -64,7 +64,7 @@ export async function postBookingToCentral(b: Booking, opts: { test?: boolean } 
     booking: b,
     status: "open",
     test: opts.test,
-    log: [logLine(`Reçue (${b.source === "phone" ? "téléphone" : "site"})`, new Date(b.createdAt))],
+    log: [logLine(`Reçue (${b.source === "phone" ? "téléphone" : b.source === "voice" ? "assistant vocal" : "site"})`, new Date(b.createdAt))],
   };
   const group = await sendToCentral<TgMessage>({ text: groupText(ride), reply_markup: groupKeyboard(ride), ...HTML });
   ride.groupMsgId = group.message_id;

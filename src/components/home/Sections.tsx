@@ -2,6 +2,7 @@ import type { Dictionary } from "@/i18n";
 import { fill } from "@/i18n";
 import type { VehicleId } from "@/config/pricing";
 import VehicleGlyph from "@/components/booking/VehicleGlyph";
+import VoiceButton from "@/components/voice/VoiceButton";
 import styles from "./Sections.module.css";
 
 /* ---------- Services ---------- */
@@ -181,15 +182,21 @@ export function Voice({ dict, phoneHref, phoneDisplay, price }: { dict: Dictiona
             ))}
           </ul>
           {phoneHref ? (
-            <a href={phoneHref} className={`btn btn-primary ${styles.voiceCta}`}>
-              {dict.cta} · {phoneDisplay}
-            </a>
+            <div className={styles.voiceActions}>
+              <a href={phoneHref} className={`btn btn-primary ${styles.voiceCta}`}>
+                {dict.cta} · {phoneDisplay}
+              </a>
+              <VoiceButton label={dict.talk} className="btn btn-ghost" />
+            </div>
           ) : (
             <div className={styles.voicePending}>
               <p>{dict.pending}</p>
-              <a href="#reserver" className="btn btn-ghost">
-                {dict.bookOnline} <span className="arrow">→</span>
-              </a>
+              <div className={styles.voiceActions}>
+                <VoiceButton label={dict.talk} className={`btn btn-primary ${styles.voiceCta}`} />
+                <a href="#reserver" className="btn btn-ghost">
+                  {dict.bookOnline} <span className="arrow">→</span>
+                </a>
+              </div>
             </div>
           )}
         </div>

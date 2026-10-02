@@ -202,7 +202,7 @@ const ADMIN_STATUS: Record<Ride["status"], string> = {
 
 export function adminText(ride: Ride): string {
   const b = ride.booking;
-  const source = b.source === "phone" ? "📞 Téléphone IA" : "🌐 Site";
+  const source = b.source === "phone" ? "📞 Téléphone IA" : b.source === "voice" ? "🎙️ Assistant vocal (site)" : "🌐 Site";
   const lines = [
     `${ADMIN_STATUS[ride.status]}${ride.driver && ride.status !== "open" ? ` · ${escapeHtml(ride.driver.name)}${ride.driver.username ? ` (@${escapeHtml(ride.driver.username)})` : ""}` : ""}`,
     `<code>${b.ref}</code> · ${source} (${b.locale.toUpperCase()})${ride.test ? " · 🧪 TEST" : ""}`,

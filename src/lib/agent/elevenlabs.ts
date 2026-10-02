@@ -92,7 +92,7 @@ function toolConfigs(secret: string) {
       type: "webhook",
       name: "get_quote",
       description:
-        "Computes the price of a trip for each vehicle class and checks the addresses. Call it once you know the pickup, the destination (transfers), the date, the time, the number of passengers and suitcases.",
+        "Computes the price of a trip for each vehicle class and checks the addresses. Call it as soon as you know the pickup, the destination (or the hours), the date and the time. Passengers and luggage are optional.",
       response_timeout_secs: 25,
       api_schema: {
         url: `${base}/api/agent/quote`,
@@ -101,7 +101,7 @@ function toolConfigs(secret: string) {
         request_headers: headers,
         request_body_schema: {
           type: "object",
-          required: ["service_type", "pickup_address", "date", "time", "passengers", "luggage", "language"],
+          required: ["service_type", "pickup_address", "date", "time", "language"],
           properties: { ...tripProps, language: languageProp },
         },
       },
@@ -135,6 +135,7 @@ function toolConfigs(secret: string) {
             language: languageProp,
             caller_id: { type: "string", dynamic_variable: "system__caller_id" },
             conversation_id: { type: "string", dynamic_variable: "system__conversation_id" },
+            channel: { type: "string", dynamic_variable: "channel" },
           },
         },
       },
@@ -223,6 +224,8 @@ function agentBody(toolIds: string[], postCallWebhookId: string | null) {
       },
     },
   };
+  // Le site lance l'assistant vocal dans la langue de la page (langue + message d'accueil).
+  platform.overrides = { conversation_config_override: { agent: { first_message: true, language: true } } };
   if (postCallWebhookId) platform.workspace_overrides = { webhooks: { post_call_webhook_id: postCallWebhookId, events: ["transcript"] } };
 
   return {
@@ -232,6 +235,8 @@ function agentBody(toolIds: string[], postCallWebhookId: string | null) {
       agent: {
         first_message: FIRST_MESSAGES.fr,
         language: "fr",
+        // "phone" par défaut ; le site passe channel="web".
+        dynamic_variables: { dynamic_variable_placeholders: { channel: "phone" } },
         prompt: {
           prompt: buildSystemPrompt({ canTransfer: !!transfer }),
           llm: llm(),
@@ -248,7 +253,7 @@ function agentBody(toolIds: string[], postCallWebhookId: string | null) {
   };
 }
 
-async function findAgentId(): Promise<string | null> {
+export async function findAgentId(): Promise<string | null> {
   if (env.elevenlabsAgentId) return env.elevenlabsAgentId;
   try {
     const list = await el<{ agents?: { agent_id: string; name?: string }[] }>(`/v1/convai/agents?search=${encodeURIComponent("RYDAR")}&page_size=100`);
@@ -256,6 +261,13 @@ async function findAgentId(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Jeton WebRTC à usage unique pour une conversation depuis le navigateur (la clé API reste côté serveur). */
+export async function conversationToken(agentId: string): Promise<string> {
+  const res = await el<{ token?: string }>(`/v1/convai/conversation/token?agent_id=${encodeURIComponent(agentId)}`);
+  if (!res.token) throw new ElevenLabsError("Jeton de conversation absent");
+  return res.token;
 }
 
 export interface AgentSetupResult {

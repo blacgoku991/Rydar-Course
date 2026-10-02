@@ -678,7 +678,7 @@ const CONTENT: Record<PageKey, Record<Locale, PageContent>> = {
           bullets: [
             "Identité et coordonnées : nom, téléphone, e-mail facultatif.",
             "Informations de trajet : adresses, date, heure, passagers, bagages, numéro de vol ou de train, remarques.",
-            "Appels à l'assistant téléphonique : numéro appelant, enregistrement et transcription de la conversation.",
+            "Échanges avec l'assistant vocal (téléphone ou site) : numéro appelant le cas échéant, enregistrement et transcription de la conversation. Sur le site, le micro n'est utilisé qu'après votre clic sur « Démarrer ».",
             "Données techniques : journaux de connexion conservés par l'hébergeur à des fins de sécurité.",
           ],
         },
@@ -695,7 +695,7 @@ const CONTENT: Record<PageKey, Record<Locale, PageContent>> = {
             "L'équipe de la centrale et le chauffeur partenaire chargé de votre trajet.",
             "Hébergement du site : Vercel Inc. (États-Unis).",
             "Messagerie de la centrale : Telegram.",
-            "Assistant téléphonique : ElevenLabs (voix et transcription) et Twilio (téléphonie), selon la ligne utilisée.",
+            "Assistant vocal : ElevenLabs (voix et transcription) et Twilio (téléphonie), selon la ligne utilisée.",
             "Recherche d'adresses : Géoplateforme de l'IGN (France) et Photon / OpenStreetMap (komoot, Allemagne).",
           ],
           body: [
@@ -730,7 +730,7 @@ const CONTENT: Record<PageKey, Record<Locale, PageContent>> = {
           bullets: [
             "Identity and contact details: name, phone, optional email.",
             "Journey information: addresses, date, time, passengers, luggage, flight or train number, notes.",
-            "Calls to the phone assistant: caller number, recording and transcript of the conversation.",
+            "Conversations with the voice assistant (phone or website): caller number where applicable, recording and transcript of the conversation. On the website, the microphone is only used after you click “Start”.",
             "Technical data: connection logs kept by our host for security purposes.",
           ],
         },
@@ -747,7 +747,7 @@ const CONTENT: Record<PageKey, Record<Locale, PageContent>> = {
             "Our dispatch team and the partner chauffeur in charge of your journey.",
             "Website hosting: Vercel Inc. (United States).",
             "Dispatch messaging: Telegram.",
-            "Phone assistant: ElevenLabs (voice and transcription) and Twilio (telephony), depending on the line used.",
+            "Voice assistant: ElevenLabs (voice and transcription) and Twilio (telephony), depending on the line used.",
             "Address search: IGN Géoplateforme (France) and Photon / OpenStreetMap (komoot, Germany).",
           ],
           body: [

@@ -75,7 +75,7 @@ export async function POST(req: Request) {
         signName: p.sign_name,
         notes: p.notes,
       },
-      source: "phone",
+      source: p.channel === "web" ? "voice" : "phone",
       locale,
       idempotencyKey: `phone:${conversationId ?? caller ?? "anon"}:${quoteId || payload.date + payload.time}:${cleanText(p.vehicle, 20)}`,
       conversationId,

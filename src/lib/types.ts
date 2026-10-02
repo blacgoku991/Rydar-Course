@@ -63,7 +63,8 @@ export interface QuoteResponse extends QuoteResult {
   childSeats: number;
 }
 
-export type BookingSource = "web" | "phone";
+/** web = formulaire du site, phone = assistant au téléphone, voice = assistant vocal sur le site. */
+export type BookingSource = "web" | "phone" | "voice";
 
 export type BookingStatus = "new" | "taken" | "done" | "cancelled";
 

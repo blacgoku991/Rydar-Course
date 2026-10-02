@@ -75,11 +75,18 @@ Toutes les variables sont décrites dans [`.env.example`](.env.example).
 
 **Ce que fait l'IA :**
 
-- Elle demande la date, les adresses, l'heure, le nombre de passagers et de bagages.
-- Elle donne le prix exact de chaque véhicule, fait un récapitulatif et attend un « oui ».
+- Elle laisse le client tout dire d'un coup et ne demande que ce qui manque : départ, destination, date, heure. Passagers et bagages sont facultatifs.
+- Elle donne le prix de chaque véhicule en une phrase, demande le nom (et le numéro de vol pour un aéroport), fait un seul récapitulatif et attend un « oui ».
 - Elle crée ensuite la réservation, épelle la référence au client et la course arrive dans Telegram.
 - Elle ne promet jamais un chauffeur confirmé : c'est la centrale qui confirme.
 - Elle ne demande jamais de carte bancaire.
+
+**Sur le site (sans téléphone) :** un bouton « Parler à l'assistant » ouvre la même IA dans le navigateur. Il apparaît en bas à droite sur ordinateur, dans la barre du bas sur mobile et dans la section « Par téléphone ».
+
+- C'est gratuit côté téléphonie : seules les minutes ElevenLabs sont consommées.
+- Le serveur délivre un jeton à usage unique (`/api/agent/session`), donc la clé ElevenLabs reste secrète. La route est limitée à 6 ouvertures par IP toutes les 10 minutes.
+- Sur le site, l'IA demande le numéro du client. Dans Telegram, la course arrive avec la mention « 🎙️ Assistant vocal (site) ».
+- Après une mise à jour du site, cliquez de nouveau sur **Créer / mettre à jour l'agent**. Ce bouton autorise la langue de la page et la variable `channel`.
 
 **Réglages :**
 
